@@ -1,61 +1,249 @@
+using System.Text.RegularExpressions;
 using UCE.Application.Documents.Abstractions;
 using UCE.Application.Documents.Models;
 using UCE.Domain.Enums;
+
 namespace UCE.Infrastructure.Chunking;
+
 public sealed class StructuralChunkingService(ITokenCounter counter) : IChunkingService
 {
- public IReadOnlyList<ChunkDto> CreateChunks(DocumentStructure structure,ChunkingOptions options)
- {
-  ArgumentNullException.ThrowIfNull(structure);
-  if(options.MaxChunkTokens<=0||options.TargetChunkTokens<=0||options.OverlapTokens<0)
-   throw new ArgumentOutOfRangeException(nameof(options));
-  var result=new List<ChunkDto>();
-  var current=new List<DocumentParagraph>();
-  var tokens=0;
-  var overlapText=string.Empty;
-  void Flush()
-  {
-   if(current.Count==0)return;
-   var first=current[0];
-   var last=current[^1];
-   var body=string.Join("\n\n",current.Select(p=>p.Text));
-   var content=string.IsNullOrWhiteSpace(overlapText)?body:overlapText+"\n\n"+body;
-   var pageNumbers=current.Where(x=>x.PageNumber.HasValue).Select(x=>x.PageNumber!.Value).ToList();
-   result.Add(new ChunkDto
-   {
-    Order=result.Count,Content=content,TokenCount=counter.Count(content),
-    SectionId=first.SectionId,SectionTitle=FindSectionTitle(structure.Sections,first.SectionId),
-    StartPosition=first.StartPosition,EndPosition=last.EndPosition,
-    StartPage=pageNumbers.Count>0?pageNumbers.Min():null,
-    EndPage=pageNumbers.Count>0?pageNumbers.Max():null,
-    DominantBlockType=current.GroupBy(x=>x.Type).OrderByDescending(g=>g.Count()).First().Key
-   });
-   overlapText=options.OverlapTokens>0?TailWords(body,options.OverlapTokens):string.Empty;
-   current.Clear();tokens=0;
-  }
-  foreach(var p in structure.Paragraphs.OrderBy(x=>x.Order))
-  {
-   var pt=counter.Count(p.Text);
-   var headingBoundary=options.PreserveHeadings&&p.IsHeading&&current.Count>0;
-   var overLimit=current.Count>0&&tokens+pt>options.MaxChunkTokens;
-   var targetReached=current.Count>0&&tokens>=options.TargetChunkTokens;
-   if(headingBoundary||overLimit||targetReached)
-   {
-    Flush();
-    if(headingBoundary)overlapText=string.Empty;
-   }
-   current.Add(p);tokens+=pt;
-   if(tokens>=options.MaxChunkTokens)Flush();
-  }
-  Flush();
-  return result;
- }
- private static string TailWords(string text,int count)
- {
-  if(count<=0||string.IsNullOrWhiteSpace(text))return string.Empty;
-  var words=text.Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries);
-  return string.Join(" ",words.Skip(Math.Max(0,words.Length-count)));
- }
+    private static readonly Regex TokenPattern =
+        new(@"\w+|[^\s]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
- private static string? FindSectionTitle(IEnumerable<DocumentStructureSection> sections,Guid? id){foreach(var s in sections){if(s.Id==id)return s.Title;var child=FindSectionTitle(s.Children,id);if(child!=null)return child;}return null;}
+    public IReadOnlyList<ChunkDto> CreateChunks(
+        DocumentStructure structure,
+        ChunkingOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(structure);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.MaxChunkTokens <= 0
+            || options.TargetChunkTokens <= 0
+            || options.MinChunkTokens < 0
+            || options.OverlapTokens < 0
+            || options.TargetChunkTokens > options.MaxChunkTokens
+            || options.MinChunkTokens > options.MaxChunkTokens)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(options), "Chunk token limits are inconsistent.");
+        }
+
+        if (options.Strategy is ChunkingStrategy.Semantic or ChunkingStrategy.Hybrid)
+        {
+            throw new NotSupportedException(
+                $"Chunking strategy '{options.Strategy}' is not implemented. " +
+                "Use Structural or Adaptive.");
+        }
+
+        var result = new List<ChunkDto>();
+        var current = new List<DocumentParagraph>();
+        var currentTokens = 0;
+        var overlapText = string.Empty;
+
+        void Flush()
+        {
+            if (current.Count == 0) return;
+
+            var body = string.Join(
+                Environment.NewLine + Environment.NewLine,
+                current.Select(x => x.Text));
+
+            var content = string.IsNullOrWhiteSpace(overlapText)
+                ? body
+                : overlapText + Environment.NewLine + Environment.NewLine + body;
+
+            var pages = current.Where(x => x.PageNumber.HasValue)
+                .Select(x => x.PageNumber!.Value).ToList();
+
+            result.Add(new ChunkDto
+            {
+                Order = result.Count,
+                Content = content,
+                TokenCount = counter.Count(content),
+                SectionId = current[0].SectionId,
+                SectionTitle = FindSectionTitle(structure.Sections, current[0].SectionId),
+                StartPosition = current.Min(x => x.StartPosition),
+                EndPosition = current.Max(x => x.EndPosition),
+                StartPage = pages.Count > 0 ? pages.Min() : null,
+                EndPage = pages.Count > 0 ? pages.Max() : null,
+                DominantBlockType = current.GroupBy(x => x.Type)
+                    .OrderByDescending(x => x.Count()).First().Key
+            });
+
+            overlapText = options.OverlapTokens > 0
+                ? TakeTailTokens(body, options.OverlapTokens)
+                : string.Empty;
+
+            current.Clear();
+            currentTokens = 0;
+        }
+
+        foreach (var original in structure.Paragraphs.OrderBy(x => x.Order))
+        {
+            if (string.IsNullOrWhiteSpace(original.Text)) continue;
+
+            foreach (var paragraph in SplitIfRequired(original, options))
+            {
+                var paragraphTokens = counter.Count(paragraph.Text);
+                var headingBoundary = options.PreserveHeadings
+                    && paragraph.IsHeading && current.Count > 0;
+
+                if (headingBoundary)
+                {
+                    Flush();
+                    overlapText = string.Empty;
+                }
+
+                TrimOverlapToFit(
+                    paragraphTokens, options.MaxChunkTokens, ref overlapText);
+
+                var projected = currentTokens
+                    + counter.Count(overlapText)
+                    + paragraphTokens;
+
+                if (current.Count > 0 && projected > options.MaxChunkTokens)
+                {
+                    Flush();
+                    TrimOverlapToFit(
+                        paragraphTokens, options.MaxChunkTokens, ref overlapText);
+                }
+
+                current.Add(paragraph);
+                currentTokens += paragraphTokens;
+
+                var actualTokens = currentTokens + counter.Count(overlapText);
+                if (actualTokens >= options.TargetChunkTokens
+                    && currentTokens >= options.MinChunkTokens)
+                {
+                    Flush();
+                }
+            }
+        }
+
+        Flush();
+        return result;
+    }
+
+    private List<DocumentParagraph> SplitIfRequired(
+        DocumentParagraph paragraph,
+        ChunkingOptions options)
+    {
+        var text = paragraph.Text;
+        var textTokens = counter.Count(text);
+        var splitLimit = options.PreserveParagraphs
+            ? options.MaxChunkTokens
+            : options.TargetChunkTokens;
+
+        if (textTokens <= splitLimit)
+            return [paragraph];
+
+        var words = Regex.Matches(text, @"\S+");
+        var pieces = new List<DocumentParagraph>();
+        var buffer = new List<string>();
+        var searchFrom = 0;
+        var pieceIndex = 0;
+
+        void AddPiece()
+        {
+            if (buffer.Count == 0) return;
+
+            var value = string.Join(" ", buffer);
+            var position = text.IndexOf(value, searchFrom, StringComparison.Ordinal);
+            if (position < 0) position = searchFrom;
+
+            pieces.Add(new DocumentParagraph
+            {
+                Order = paragraph.Order,
+                Text = value,
+                StartPosition = paragraph.StartPosition + position,
+                EndPosition = paragraph.StartPosition + position + value.Length,
+                PageNumber = paragraph.PageNumber,
+                IsHeading = paragraph.IsHeading && pieceIndex == 0,
+                HeadingLevel = paragraph.HeadingLevel,
+                StyleName = paragraph.StyleName,
+                Type = paragraph.Type,
+                Marker = paragraph.Marker,
+                SectionId = paragraph.SectionId
+            });
+
+            searchFrom = Math.Min(text.Length, position + value.Length);
+            pieceIndex++;
+            buffer.Clear();
+        }
+
+        foreach (Match word in words)
+        {
+            var candidate = buffer.Count == 0
+                ? word.Value
+                : string.Join(" ", buffer) + " " + word.Value;
+
+            if (buffer.Count > 0 && counter.Count(candidate) > splitLimit)
+            {
+                AddPiece();
+                buffer.Add(word.Value);
+                continue;
+            }
+
+            if (buffer.Count == 0 && counter.Count(word.Value) > splitLimit)
+            {
+                var remainder = word.Value;
+                while (remainder.Length > 0)
+                {
+                    var length = remainder.Length;
+                    while (length > 1 && counter.Count(remainder[..length]) > splitLimit)
+                        length /= 2;
+
+                    buffer.Add(remainder[..length]);
+                    AddPiece();
+                    remainder = remainder[length..];
+                }
+
+                continue;
+            }
+
+            buffer.Add(word.Value);
+        }
+
+        AddPiece();
+        return pieces.Count > 0 ? pieces : [paragraph];
+    }
+
+    private void TrimOverlapToFit(
+        int nextParagraphTokens,
+        int maxTokens,
+        ref string overlap)
+    {
+        if (string.IsNullOrEmpty(overlap)) return;
+
+        var available = Math.Max(0, maxTokens - nextParagraphTokens);
+        if (counter.Count(overlap) <= available) return;
+
+        overlap = TakeTailTokens(overlap, available);
+    }
+
+    private string TakeTailTokens(string text, int tokenCount)
+    {
+        if (tokenCount <= 0 || string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        var matches = TokenPattern.Matches(text);
+        if (matches.Count == 0) return string.Empty;
+
+        var first = Math.Max(0, matches.Count - tokenCount);
+        return text[matches[first].Index..].Trim();
+    }
+
+    private static string? FindSectionTitle(
+        IEnumerable<DocumentStructureSection> sections,
+        Guid? id)
+    {
+        foreach (var section in sections)
+        {
+            if (section.Id == id) return section.Title;
+            var child = FindSectionTitle(section.Children, id);
+            if (child is not null) return child;
+        }
+
+        return null;
+    }
 }
