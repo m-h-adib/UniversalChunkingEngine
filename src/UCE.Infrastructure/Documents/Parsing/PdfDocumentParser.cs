@@ -31,7 +31,7 @@ public sealed class PdfDocumentParser(ITextNormalizer normalizer, ITextLanguageD
             var pageText = normalizer.Normalize(page.Text ?? string.Empty);
 
             if (fullText.Length > 0)
-                fullText.AppendLine().AppendLine();
+                fullText.Append("\n\n");
 
             var pageStart = fullText.Length;
             fullText.Append(pageText);

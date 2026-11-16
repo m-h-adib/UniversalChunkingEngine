@@ -35,6 +35,7 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
                 "Use Structural or Adaptive.");
         }
 
+        // Adaptive currently uses the structural baseline until an adaptive planner is added.
         var result = new List<ChunkDto>();
         var current = new List<DocumentParagraph>();
         var currentTokens = 0;
@@ -129,34 +130,40 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
         ChunkingOptions options)
     {
         var text = paragraph.Text;
-        var textTokens = counter.Count(text);
         var splitLimit = options.PreserveParagraphs
             ? options.MaxChunkTokens
             : options.TargetChunkTokens;
 
-        if (textTokens <= splitLimit)
+        if (counter.Count(text) <= splitLimit)
             return [paragraph];
 
         var words = Regex.Matches(text, @"\S+");
         var pieces = new List<DocumentParagraph>();
         var buffer = new List<string>();
-        var searchFrom = 0;
+        var bufferStart = 0;
+        var bufferEnd = 0;
         var pieceIndex = 0;
+
+        void AddWord(string value, int start, int end)
+        {
+            if (buffer.Count == 0)
+                bufferStart = start;
+
+            buffer.Add(value);
+            bufferEnd = end;
+        }
 
         void AddPiece()
         {
             if (buffer.Count == 0) return;
 
             var value = string.Join(" ", buffer);
-            var position = text.IndexOf(value, searchFrom, StringComparison.Ordinal);
-            if (position < 0) position = searchFrom;
-
             pieces.Add(new DocumentParagraph
             {
                 Order = paragraph.Order,
                 Text = value,
-                StartPosition = paragraph.StartPosition + position,
-                EndPosition = paragraph.StartPosition + position + value.Length,
+                StartPosition = paragraph.StartPosition + bufferStart,
+                EndPosition = paragraph.StartPosition + bufferEnd,
                 PageNumber = paragraph.PageNumber,
                 IsHeading = paragraph.IsHeading && pieceIndex == 0,
                 HeadingLevel = paragraph.HeadingLevel,
@@ -166,7 +173,6 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
                 SectionId = paragraph.SectionId
             });
 
-            searchFrom = Math.Min(text.Length, position + value.Length);
             pieceIndex++;
             buffer.Clear();
         }
@@ -180,28 +186,32 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
             if (buffer.Count > 0 && counter.Count(candidate) > splitLimit)
             {
                 AddPiece();
-                buffer.Add(word.Value);
+                AddWord(word.Value, word.Index, word.Index + word.Length);
                 continue;
             }
 
             if (buffer.Count == 0 && counter.Count(word.Value) > splitLimit)
             {
                 var remainder = word.Value;
+                var offset = 0;
+
                 while (remainder.Length > 0)
                 {
                     var length = remainder.Length;
                     while (length > 1 && counter.Count(remainder[..length]) > splitLimit)
                         length /= 2;
 
-                    buffer.Add(remainder[..length]);
+                    var part = remainder[..length];
+                    AddWord(part, word.Index + offset, word.Index + offset + length);
                     AddPiece();
                     remainder = remainder[length..];
+                    offset += length;
                 }
 
                 continue;
             }
 
-            buffer.Add(word.Value);
+            AddWord(word.Value, word.Index, word.Index + word.Length);
         }
 
         AddPiece();
@@ -229,8 +239,24 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
         var matches = TokenPattern.Matches(text);
         if (matches.Count == 0) return string.Empty;
 
-        var first = Math.Max(0, matches.Count - tokenCount);
-        return text[matches[first].Index..].Trim();
+        var start = Math.Max(0, matches.Count - tokenCount);
+        var suffix = text[matches[start].Index..].Trim();
+
+        while (start < matches.Count - 1 && counter.Count(suffix) > tokenCount)
+        {
+            start++;
+            suffix = text[matches[start].Index..].Trim();
+        }
+
+        while (start > 0)
+        {
+            var candidate = text[matches[start - 1].Index..].Trim();
+            if (counter.Count(candidate) > tokenCount) break;
+            suffix = candidate;
+            start--;
+        }
+
+        return suffix;
     }
 
     private static string? FindSectionTitle(
