@@ -47,9 +47,6 @@ public sealed class DocxDocumentParser(ITextLanguageDetector languageDetector) :
                     hasContentOnCurrentPage = false;
                 }
 
-                // TOC entries are navigation metadata, not source content.
-                // Use Word's semantic TOC styles and field markers rather than
-                // deleting ordinary paragraphs merely because they look like headings.
                 if (IsTableOfContentsParagraph(paragraph, style))
                 {
                     AdvancePageMarkers(paragraph, ref pageNumber, ref hasContentOnCurrentPage);
@@ -131,8 +128,9 @@ public sealed class DocxDocumentParser(ITextLanguageDetector languageDetector) :
                 || style.StartsWith("TableOfContents", StringComparison.OrdinalIgnoreCase)))
             return true;
 
+        // In Open XML, w:instrText is represented by FieldCode.
         var fieldInstructions = string.Join(" ",
-            paragraph.Descendants<W.InstrText>().Select(x => x.Text));
+            paragraph.Descendants<W.FieldCode>().Select(x => x.Text));
         var searchable = string.Concat(paragraph.InnerText, " ", fieldInstructions);
 
         return searchable.Contains("PAGEREF", StringComparison.OrdinalIgnoreCase)
