@@ -1,0 +1,3 @@
+using UCE.Domain.Enums;
+namespace UCE.Application.Documents.Models;
+public sealed class ChunkingOptions { public ChunkingStrategy Strategy { get; set; } = ChunkingStrategy.Adaptive; public int MinChunkTokens { get; set; } = 200; public int MaxChunkTokens { get; set; } = 700; public int TargetChunkTokens { get; set; } = 450; public int OverlapTokens { get; set; } = 60; public bool PreserveHeadings { get; set; } = true; public bool PreserveParagraphs { get; set; } = true; }

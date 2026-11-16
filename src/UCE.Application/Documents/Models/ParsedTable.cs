@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class ParsedTable { public int Order { get; set; } public int RowCount { get; set; } public int ColumnCount { get; set; } public List<ParsedTableRow> Rows { get; set; } = []; public Dictionary<string,string> Metadata { get; set; } = []; }

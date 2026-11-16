@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class ParsedTableCell { public int RowIndex { get; set; } public int ColumnIndex { get; set; } public string Text { get; set; } = string.Empty; public int ColumnSpan { get; set; } = 1; public int RowSpan { get; set; } = 1; }

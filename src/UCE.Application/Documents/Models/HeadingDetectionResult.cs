@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class HeadingDetectionResult { public bool IsHeading { get; set; } public int? Level { get; set; } public double Confidence { get; set; } public List<string> Reasons { get; set; } = []; }

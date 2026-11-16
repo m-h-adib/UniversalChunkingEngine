@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class DocumentStructure { public string FullText { get; set; } = string.Empty; public List<DocumentStructureSection> Sections { get; set; } = []; public List<DocumentParagraph> Paragraphs { get; set; } = []; }

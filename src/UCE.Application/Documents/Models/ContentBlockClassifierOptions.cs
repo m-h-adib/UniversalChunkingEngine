@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class ContentBlockClassifierOptions { public bool DetectOrderedLists { get; set; } = true; public bool DetectUnorderedLists { get; set; } = true; public bool DetectQuotes { get; set; } = true; public bool DetectFootnotes { get; set; } = true; public bool DetectQuranVerses { get; set; } = true; public int MinimumTextLength { get; set; } = 2; }

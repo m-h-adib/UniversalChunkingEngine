@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class ParsedParagraph { public string Text { get; set; } = string.Empty; public string? StyleName { get; set; } public int Order { get; set; } public int StartPosition { get; set; } public int EndPosition { get; set; } public int? PageNumber { get; set; } }

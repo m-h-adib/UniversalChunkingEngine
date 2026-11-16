@@ -1,0 +1,3 @@
+using UCE.Domain.Enums;
+namespace UCE.Application.Documents.Models;
+public sealed class ParsedDocument { public string? Title { get; set; } public string? Author { get; set; } public string SourceFileName { get; set; } = string.Empty; public string FullText { get; set; } = string.Empty; public DocumentLanguage Language { get; set; } public List<ParsedParagraph> ParsedParagraphs { get; set; } = []; public List<ParsedPage> Pages { get; set; } = []; public List<ParsedTable> Tables { get; set; } = []; public List<ParsedBlock> Blocks { get; set; } = []; public Dictionary<string,string> Metadata { get; set; } = []; }

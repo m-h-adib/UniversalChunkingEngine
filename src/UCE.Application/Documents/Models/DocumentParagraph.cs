@@ -1,0 +1,3 @@
+using UCE.Domain.Enums;
+namespace UCE.Application.Documents.Models;
+public sealed class DocumentParagraph { public int Order { get; set; } public string Text { get; set; } = string.Empty; public int StartPosition { get; set; } public int EndPosition { get; set; } public int? PageNumber { get; set; } public bool IsHeading { get; set; } public int HeadingLevel { get; set; } public string? StyleName { get; set; } public ContentBlockType Type { get; set; } = ContentBlockType.Unknown; public string? Marker { get; set; } public Guid? SectionId { get; set; } }

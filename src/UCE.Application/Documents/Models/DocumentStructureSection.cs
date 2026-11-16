@@ -1,0 +1,2 @@
+namespace UCE.Application.Documents.Models;
+public sealed class DocumentStructureSection { public Guid Id { get; set; } = Guid.NewGuid(); public Guid? ParentId { get; set; } public string Title { get; set; } = string.Empty; public int Level { get; set; } public int Order { get; set; } public int StartPosition { get; set; } public int EndPosition { get; set; } public List<DocumentStructureSection> Children { get; set; } = []; public List<DocumentParagraph> Paragraphs { get; set; } = []; }
