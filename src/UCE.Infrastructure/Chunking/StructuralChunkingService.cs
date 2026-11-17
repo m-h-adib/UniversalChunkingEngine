@@ -74,6 +74,7 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
                 SectionTitle = section?.Title
                     ?? FindSectionTitle(structure.Sections, sectionId),
                 SectionLevel = section?.Level,
+                SectionDepth = sectionPath.Count,
                 ParentSectionId = parentSection?.Id,
                 ParentSectionTitle = parentSection?.Title,
                 SectionPath = sectionPath.Select(x => x.Title).ToList(),
