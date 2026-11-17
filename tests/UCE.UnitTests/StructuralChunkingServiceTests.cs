@@ -207,4 +207,44 @@ public class StructuralChunkingServiceTests
         Assert.Equal("حکم مستقل و کوتاه", chunk.Content);
     }
 
+    [Fact]
+    public void CombinesShortParagraphsInsideTheSameSection()
+    {
+        var service = new StructuralChunkingService(new ApproximateTokenCounter());
+        var sectionId = Guid.NewGuid();
+        var structure = new DocumentStructure();
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 0,
+            Text = "پاراگراف کوتاه اول",
+            StartPosition = 0,
+            EndPosition = 18,
+            SectionId = sectionId,
+            Type = ContentBlockType.Paragraph
+        });
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 1,
+            Text = "پاراگراف کوتاه دوم",
+            StartPosition = 20,
+            EndPosition = 38,
+            SectionId = sectionId,
+            Type = ContentBlockType.Paragraph
+        });
+
+        var chunks = service.CreateChunks(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Structural,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 100,
+            MaxChunkTokens = 120,
+            OverlapTokens = 0
+        });
+
+        var chunk = Assert.Single(chunks);
+        Assert.Contains("پاراگراف کوتاه اول", chunk.Content);
+        Assert.Contains("پاراگراف کوتاه دوم", chunk.Content);
+        Assert.Equal(sectionId, chunk.SectionId);
+    }
+
 }
