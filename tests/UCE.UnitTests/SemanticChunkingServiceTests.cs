@@ -36,7 +36,7 @@ public sealed class SemanticChunkingServiceTests
 
         Assert.Equal(2, chunks.Count);
         Assert.Equal(
-            "موضوع اول. توضیح اول.\n\nادامه همان موضوع با توضیح تکمیلی.",
+            $"موضوع اول. توضیح اول.{Environment.NewLine}{Environment.NewLine}ادامه همان موضوع با توضیح تکمیلی.",
             chunks[0].Content);
         Assert.Equal("موضوع مستقل دوم و توضیح آن.", chunks[1].Content);
         Assert.Equal(0, chunks[0].StartPosition);
