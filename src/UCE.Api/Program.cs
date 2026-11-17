@@ -144,7 +144,7 @@ app.MapPost("/api/documents/chunk-embed",
         catch (InvalidDataException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (HttpRequestException ex)
         {
-            return Results.Problem(title: "سرویس BGE-M3 در دسترس نیست.", detail: ex.Message,
+            return Results.Problem(title: "ارتباط با Ollama یا BGE-M3 برقرار نشد.", detail: ex.Message,
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (InvalidOperationException ex)
@@ -196,7 +196,7 @@ app.MapPost("/api/documents/index",
         catch (InvalidDataException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (HttpRequestException ex)
         {
-            return Results.Problem(title: "ارتباط با سرویس Embedding یا Qdrant برقرار نشد.",
+            return Results.Problem(title: "ارتباط با Ollama، سرویس Embedding یا Qdrant برقرار نشد.",
                 detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         catch (InvalidOperationException ex)
