@@ -94,6 +94,16 @@ app.MapPost("/api/documents/chunk",
         }
         catch (NotSupportedException ex) { return Results.BadRequest(new { error = ex.Message }); }
         catch (InvalidDataException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        catch (HttpRequestException ex)
+        {
+            return Results.Problem(title: "ارتباط با Ollama برقرار نشد.", detail: ex.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(title: "پاسخ مدل معنایی معتبر نیست.", detail: ex.Message,
+                statusCode: StatusCodes.Status502BadGateway);
+        }
     })
     .DisableAntiforgery().WithName("ChunkDocument").WithTags("Documents");
 
