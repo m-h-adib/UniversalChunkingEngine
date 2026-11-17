@@ -62,7 +62,8 @@ public sealed class OllamaSemanticBoundaryDetectorTests
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => detector.DetectBoundariesAsync(Paragraphs(3)));
 
-        Assert.Contains("after one retry", exception.Message);
+        Assert.Contains("after JSON-mode retry", exception.Message);
+        Assert.Contains("boundary index 9", exception.Message);
         Assert.Equal(2, handler.RequestCount);
     }
 
