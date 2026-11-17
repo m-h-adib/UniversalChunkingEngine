@@ -65,8 +65,8 @@ public class StructuralChunkingServiceTests
         };
         var subsection = new DocumentStructureSection
         {
-            Title = "گفتار اول: میقات",
-            Level = 2,
+            Title = "مسئله1: احرام از میقات",
+            Level = 3,
             ParentId = chapter.Id
         };
         root.Children.Add(chapter);
@@ -86,12 +86,12 @@ public class StructuralChunkingServiceTests
         structure.Paragraphs.Add(new DocumentParagraph
         {
             Order = 1,
-            Text = "گفتار اول: میقات",
+            Text = "مسئله1: احرام از میقات",
             StartPosition = 62,
             EndPosition = 78,
             SectionId = subsection.Id,
             IsHeading = true,
-            HeadingLevel = 2,
+            HeadingLevel = 3,
             Type = ContentBlockType.Heading
         });
         structure.Paragraphs.Add(new DocumentParagraph
@@ -115,13 +115,14 @@ public class StructuralChunkingServiceTests
         });
 
         Assert.Equal(2, chunks.Count);
-        Assert.StartsWith("گفتار اول: میقات", chunks[1].Content);
+        Assert.StartsWith("مسئله1: احرام از میقات", chunks[1].Content);
         Assert.DoesNotContain("این متن قبلی", chunks[1].Content);
-        Assert.Equal(2, chunks[1].SectionLevel);
+        Assert.Equal(3, chunks[1].SectionLevel);
+        Assert.Equal(2, chunks[1].SectionDepth);
         Assert.Equal(chapter.Id, chunks[1].ParentSectionId);
         Assert.Equal("فصل اول: احرام", chunks[1].ParentSectionTitle);
         Assert.Equal(
-            new[] { "فصل اول: احرام", "گفتار اول: میقات" },
+            new[] { "فصل اول: احرام", "مسئله1: احرام از میقات" },
             chunks[1].SectionPath);
     }
 
