@@ -40,6 +40,8 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
         var current = new List<DocumentParagraph>();
         var currentTokens = 0;
         var overlapText = string.Empty;
+        Guid? activeSectionId = null;
+        var hasActiveSection = false;
 
         void Flush()
         {
@@ -59,6 +61,9 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
                 Environment.NewLine + Environment.NewLine,
                 current.Select(x => x.Text));
 
+            // Positions identify the source text owned by this chunk. Repeated overlap
+            // is retrieval context and is deliberately excluded from this source range.
+            var appliedOverlapTokens = counter.Count(overlapText);
             var content = string.IsNullOrWhiteSpace(overlapText)
                 ? body
                 : overlapText + Environment.NewLine + Environment.NewLine + body;
@@ -80,6 +85,7 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
                 Order = result.Count,
                 Content = content,
                 TokenCount = counter.Count(content),
+                OverlapTokenCount = appliedOverlapTokens,
                 SectionId = sectionId,
                 SectionTitle = section?.Title
                     ?? FindSectionTitle(structure.Sections, sectionId),
@@ -111,6 +117,20 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
             foreach (var paragraph in SplitIfRequired(original, options))
             {
                 var paragraphTokens = counter.Count(paragraph.Text);
+
+                // SectionId is the authoritative structural boundary. Do not carry
+                // overlap or combine paragraphs across sections, even if a paragraph
+                // was not classified as a heading by the detector.
+                if (hasActiveSection && paragraph.SectionId != activeSectionId)
+                {
+                    if (current.Count > 0)
+                        Flush();
+
+                    overlapText = string.Empty;
+                }
+
+                activeSectionId = paragraph.SectionId;
+                hasActiveSection = true;
 
                 // A heading starts a new structural context. Clear overlap even when
                 // the previous chunk was already flushed by the token target.
