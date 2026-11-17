@@ -170,20 +170,13 @@ public sealed class SemanticChunkingService(
         {
             var sectionId = paragraphs[start].SectionId;
             var end = start;
-            var batchCharacters = Math.Min(
-                paragraphs[start].Text.Length, _semanticOptions.MaxInputCharacters);
             var maxParagraphs = Math.Max(2, _semanticOptions.MaxParagraphsPerRequest);
             while (end + 1 < paragraphs.Count
                 && paragraphs[end + 1].SectionId == sectionId
-                && end - start + 1 < maxParagraphs
-                && batchCharacters + Math.Min(
-                    paragraphs[end + 1].Text.Length,
-                    _semanticOptions.MaxInputCharacters) <= _semanticOptions.MaxInputCharacters)
-            {
+                && end - start + 1 < maxParagraphs)
                 end++;
-                batchCharacters += Math.Min(
-                    paragraphs[end].Text.Length, _semanticOptions.MaxInputCharacters);
-            }
+            var perParagraphCharacterBudget = Math.Max(
+                1, _semanticOptions.MaxInputCharacters / Math.Max(2, end - start + 1));
 
             if (end > start)
             {
@@ -192,8 +185,8 @@ public sealed class SemanticChunkingService(
                 var batch = paragraphs.Skip(start).Take(end - start + 1)
                     .Select(x => new SemanticParagraphInput(
                         x.Order,
-                        x.Text.Length > _semanticOptions.MaxInputCharacters
-                            ? x.Text[.._semanticOptions.MaxInputCharacters]
+                        x.Text.Length > perParagraphCharacterBudget
+                            ? x.Text[..perParagraphCharacterBudget]
                             : x.Text,
                         x.IsHeading,
                         sectionTitle))
