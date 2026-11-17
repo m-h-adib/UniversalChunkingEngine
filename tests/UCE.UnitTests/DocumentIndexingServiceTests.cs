@@ -88,6 +88,13 @@ public sealed class DocumentIndexingServiceTests
             StoredPoints = points;
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<VectorSearchResult>> SearchAsync(
+            float[] vector,
+            Guid? documentId,
+            int limit,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<VectorSearchResult>>([]);
     }
 
     private sealed class FakeChunkingService(IReadOnlyList<ChunkDto> chunks) : IChunkingService

@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<IChunkingService, StructuralChunkingService>();
         services.AddScoped<ChunkEmbeddingService>();
         services.AddScoped<DocumentIndexingService>();
+        services.AddScoped<DocumentSearchService>();
 
         services.AddScoped<IDocumentParser, TxtDocumentParser>();
         services.AddScoped<IDocumentParser, DocxDocumentParser>();
