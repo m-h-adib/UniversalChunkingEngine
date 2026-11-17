@@ -75,13 +75,24 @@ public sealed class OllamaSemanticBoundaryDetector(
         if (string.IsNullOrWhiteSpace(content))
             throw new InvalidOperationException("Ollama returned an empty semantic-boundary response.");
 
-        using var document = JsonDocument.Parse(content);
-        if (!document.RootElement.TryGetProperty("splitAfter", out var values)
-            || values.ValueKind != JsonValueKind.Array)
-            throw new InvalidOperationException("Ollama response must contain a splitAfter array.");
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(content);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("Ollama returned invalid JSON for semantic boundaries.", ex);
+        }
 
-        var result = new HashSet<int>();
-        foreach (var value in values.EnumerateArray())
+        using (document)
+        {
+            if (!document.RootElement.TryGetProperty("splitAfter", out var values)
+                || values.ValueKind != JsonValueKind.Array)
+                throw new InvalidOperationException("Ollama response must contain a splitAfter array.");
+
+            var result = new HashSet<int>();
+            foreach (var value in values.EnumerateArray())
         {
             if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var index))
                 throw new InvalidOperationException("Ollama returned a non-integer boundary index.");
@@ -89,10 +100,11 @@ public sealed class OllamaSemanticBoundaryDetector(
             if (index < 0 || index >= paragraphs.Count - 1)
                 throw new InvalidOperationException($"Ollama returned an out-of-range boundary index: {index}.");
 
-            result.Add(index);
-        }
+                result.Add(index);
+            }
 
-        return result;
+            return result;
+        }
     }
 
     private sealed class OllamaChatResponse
