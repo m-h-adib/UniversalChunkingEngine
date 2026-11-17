@@ -126,6 +126,96 @@ public class StructuralChunkingServiceTests
             chunks[1].SectionPath);
     }
 
+
+    [Fact]
+    public void DoesNotCarryOverlapAcrossSectionBoundaryWithoutHeadingFlag()
+    {
+        var service = new StructuralChunkingService(new ApproximateTokenCounter());
+        var firstSectionId = Guid.NewGuid();
+        var secondSectionId = Guid.NewGuid();
+        var structure = new DocumentStructure();
+
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 0,
+            Text = "متن بخش اول شامل چندین واژه برای ایجاد چانک مستقل و تولید همپوشانی است",
+            StartPosition = 0,
+            EndPosition = 70,
+            SectionId = firstSectionId,
+            Type = ContentBlockType.Paragraph
+        });
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 1,
+            Text = "متن بخش دوم نباید هیچ بخشی از متن قبلی را به عنوان همپوشانی دریافت کند",
+            StartPosition = 72,
+            EndPosition = 145,
+            SectionId = secondSectionId,
+            Type = ContentBlockType.Paragraph
+        });
+
+        var chunks = service.CreateChunks(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Structural,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 8,
+            MaxChunkTokens = 40,
+            OverlapTokens = 5,
+            PreserveHeadings = true
+        });
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Equal(firstSectionId, chunks[0].SectionId);
+        Assert.Equal(secondSectionId, chunks[1].SectionId);
+        Assert.DoesNotContain("متن بخش اول", chunks[1].Content);
+        Assert.Equal(0, chunks[1].OverlapTokenCount);
+    }
+
+    [Fact]
+    public void ReportsOverlapSeparatelyFromOwnedSourcePositions()
+    {
+        var service = new StructuralChunkingService(new ApproximateTokenCounter());
+        var sectionId = Guid.NewGuid();
+        var structure = new DocumentStructure();
+        const string first = "این پاراگراف اول برای ایجاد همپوشانی و شکستن چانک نوشته شده است";
+        const string second = "این پاراگراف دوم ادامه همان بخش است و باید موقعیت اصلی خودش را حفظ کند";
+
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 0,
+            Text = first,
+            StartPosition = 100,
+            EndPosition = 100 + first.Length,
+            SectionId = sectionId,
+            Type = ContentBlockType.Paragraph
+        });
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 1,
+            Text = second,
+            StartPosition = 100 + first.Length + 2,
+            EndPosition = 100 + first.Length + 2 + second.Length,
+            SectionId = sectionId,
+            Type = ContentBlockType.Paragraph
+        });
+
+        var chunks = service.CreateChunks(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Structural,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 8,
+            MaxChunkTokens = 40,
+            OverlapTokens = 3
+        });
+
+        Assert.True(chunks.Count >= 2);
+        var secondChunk = chunks[1];
+        Assert.True(secondChunk.OverlapTokenCount > 0);
+        Assert.Equal(100 + first.Length + 2, secondChunk.StartPosition);
+        Assert.Equal(100 + first.Length + 2 + second.Length, secondChunk.EndPosition);
+        Assert.True(secondChunk.TokenCount >= secondChunk.OverlapTokenCount);
+    }
+
     [Fact]
     public void DoesNotEmitHeadingOnlySectionsAsRetrievalChunks()
     {
