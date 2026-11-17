@@ -6,8 +6,8 @@ using UCE.Application.Documents.Abstractions;
 namespace UCE.Infrastructure.Chunking;
 
 /// <summary>
-/// Uses Ollama's native /api/chat endpoint to identify topic boundaries.
-/// The model returns indexes only; source text is never rewritten.
+/// Uses Ollama to identify topic boundaries. The model returns indexes only;
+/// chunks are always assembled from the original source paragraphs.
 /// </summary>
 public sealed class OllamaSemanticBoundaryDetector(
     HttpClient httpClient,
@@ -17,17 +17,30 @@ public sealed class OllamaSemanticBoundaryDetector(
 
     private const string SystemPrompt = """
         You are a semantic document segmentation engine.
-        Identify only genuine topic boundaries between consecutive paragraphs.
-        A boundary means the next paragraph starts a meaningfully different topic,
-        subtopic, rule, event, person, argument, or procedure. Do not split merely
-        because wording, examples, or paragraph style changes. Keep explanations,
-        conditions, exceptions, evidence, and examples with the topic they explain.
-        A heading starts a new topic and should have a boundary before it when possible.
-        Return ONLY valid JSON in this exact shape:
-        {"splitAfter":[0,2]}
-        Indexes are zero-based indexes of paragraphs AFTER which a new chunk should start.
-        Never return the final paragraph index. Do not summarize or rewrite any text.
+        Find only meaningful topic changes between consecutive paragraphs.
+        Keep explanations, examples, evidence, conditions and exceptions with
+        the topic they explain. A heading starts a new topic when appropriate.
+        Return a JSON object with exactly one property named splitAfter.
+        splitAfter is an array of zero-based paragraph indexes. An index N means
+        a new topic starts at paragraph N+1. Do not include the final paragraph
+        index. Return [] when there is no topic change.
+        Do not summarize, rewrite, translate or reproduce the paragraph text.
         """;
+
+    private static readonly object ResponseFormat = new
+    {
+        type = "object",
+        properties = new
+        {
+            splitAfter = new
+            {
+                type = "array",
+                items = new { type = "integer" }
+            }
+        },
+        required = new[] { "splitAfter" },
+        additionalProperties = false
+    };
 
     public async Task<IReadOnlySet<int>> DetectBoundariesAsync(
         IReadOnlyList<SemanticParagraphInput> paragraphs,
@@ -41,27 +54,58 @@ public sealed class OllamaSemanticBoundaryDetector(
             paragraphs = paragraphs.Select((p, index) => new
             {
                 index,
-                p.IsHeading,
+                isHeading = p.IsHeading,
                 section = p.SectionTitle,
                 text = p.Text
             })
         };
 
+        var userContent = """
+            Decide where the subject changes in this ordered list of paragraphs.
+            Consider the meaning of each paragraph in relation to its neighbors.
+            Output only the required JSON object.
+            """;
+
+        var firstResponse = await RequestAsync(
+            userContent + Environment.NewLine + JsonSerializer.Serialize(payload),
+            cancellationToken);
+
+        if (TryParseBoundaries(firstResponse, paragraphs.Count, out var boundaries, out var error))
+            return boundaries;
+
+        // Small local models occasionally ignore the requested schema. Retry once
+        // with a compact correction request; never silently switch chunking modes.
+        var retryContent = $$"""
+            Your previous answer was invalid: {{error}}
+            Correct the answer using the paragraph list below.
+            Return ONLY this JSON shape: {"splitAfter":[]}
+            splitAfter must contain zero-based integer indexes from 0 to {{paragraphs.Count - 2}}.
+            Do not include the final paragraph index or any other property.
+            Paragraphs:
+            {{JsonSerializer.Serialize(payload)}}
+            """;
+
+        var retryResponse = await RequestAsync(retryContent, cancellationToken);
+        if (TryParseBoundaries(retryResponse, paragraphs.Count, out boundaries, out error))
+            return boundaries;
+
+        throw new InvalidOperationException(
+            $"Ollama returned an invalid semantic-boundary response after one retry: {error}");
+    }
+
+    private async Task<string> RequestAsync(string userContent, CancellationToken cancellationToken)
+    {
         var request = new
         {
             model = _options.Model,
             stream = false,
-            format = "json",
+            format = ResponseFormat,
             messages = new[]
             {
                 new { role = "system", content = SystemPrompt },
-                new
-                {
-                    role = "user",
-                    content = JsonSerializer.Serialize(payload)
-                }
+                new { role = "user", content = userContent }
             },
-            options = new { temperature = 0 }
+            options = new { temperature = 0, seed = 42 }
         };
 
         using var response = await httpClient.PostAsJsonAsync(
@@ -71,39 +115,71 @@ public sealed class OllamaSemanticBoundaryDetector(
         var envelope = await response.Content.ReadFromJsonAsync<OllamaChatResponse>(
             cancellationToken: cancellationToken);
 
-        var content = envelope?.Message?.Content;
-        if (string.IsNullOrWhiteSpace(content))
-            throw new InvalidOperationException("Ollama returned an empty semantic-boundary response.");
+        return envelope?.Message?.Content ?? string.Empty;
+    }
 
-        JsonDocument document;
+    private static bool TryParseBoundaries(
+        string content,
+        int paragraphCount,
+        out IReadOnlySet<int> boundaries,
+        out string error)
+    {
+        boundaries = new HashSet<int>();
+        error = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            error = "response content was empty";
+            return false;
+        }
+
+        // Be tolerant of markdown fences or a short preamble, while still
+        // requiring a valid JSON object with the exact contract.
+        var jsonStart = content.IndexOf('{');
+        var jsonEnd = content.LastIndexOf('}');
+        if (jsonStart < 0 || jsonEnd <= jsonStart)
+        {
+            error = "response did not contain a JSON object";
+            return false;
+        }
+
         try
         {
-            document = JsonDocument.Parse(content);
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidOperationException("Ollama returned invalid JSON for semantic boundaries.", ex);
-        }
-
-        using (document)
-        {
-            if (!document.RootElement.TryGetProperty("splitAfter", out var values)
+            using var document = JsonDocument.Parse(content[jsonStart..(jsonEnd + 1)]);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("splitAfter", out var values)
                 || values.ValueKind != JsonValueKind.Array)
-                throw new InvalidOperationException("Ollama response must contain a splitAfter array.");
-
-            var result = new HashSet<int>();
-            foreach (var value in values.EnumerateArray())
-        {
-            if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var index))
-                throw new InvalidOperationException("Ollama returned a non-integer boundary index.");
-
-            if (index < 0 || index >= paragraphs.Count - 1)
-                throw new InvalidOperationException($"Ollama returned an out-of-range boundary index: {index}.");
-
-                result.Add(index);
+            {
+                error = "JSON object must contain a splitAfter array";
+                return false;
             }
 
-            return result;
+            var parsed = new HashSet<int>();
+            foreach (var value in values.EnumerateArray())
+            {
+                if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var index))
+                {
+                    error = "splitAfter must contain only integer indexes";
+                    return false;
+                }
+
+                if (index < 0 || index >= paragraphCount - 1)
+                {
+                    error = $"boundary index {index} is outside the valid range 0..{paragraphCount - 2}";
+                    return false;
+                }
+
+                parsed.Add(index);
+            }
+
+            boundaries = parsed;
+            return true;
+        }
+        catch (JsonException)
+        {
+            error = "response contained malformed JSON";
+            return false;
         }
     }
 
