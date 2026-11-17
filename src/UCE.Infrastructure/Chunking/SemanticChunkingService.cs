@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using UCE.Application.Documents.Abstractions;
 using UCE.Application.Documents.Models;
 using UCE.Domain.Enums;
+using Microsoft.Extensions.Options;
 
 namespace UCE.Infrastructure.Chunking;
 
@@ -13,8 +14,10 @@ namespace UCE.Infrastructure.Chunking;
 public sealed class SemanticChunkingService(
     ISemanticBoundaryDetector boundaryDetector,
     IChunkingService structuralChunker,
-    ITokenCounter tokenCounter) : ISemanticChunkingService
+    ITokenCounter tokenCounter,
+    IOptions<SemanticChunkingOptions> semanticOptions) : ISemanticChunkingService
 {
+    private readonly SemanticChunkingOptions _semanticOptions = semanticOptions.Value;
     private static readonly Regex Words = new(@"\S+", RegexOptions.Compiled);
 
     public async Task<IReadOnlyList<ChunkDto>> CreateChunksAsync(
@@ -167,10 +170,20 @@ public sealed class SemanticChunkingService(
         {
             var sectionId = paragraphs[start].SectionId;
             var end = start;
+            var batchCharacters = Math.Min(
+                paragraphs[start].Text.Length, _semanticOptions.MaxInputCharacters);
+            var maxParagraphs = Math.Max(2, _semanticOptions.MaxParagraphsPerRequest);
             while (end + 1 < paragraphs.Count
                 && paragraphs[end + 1].SectionId == sectionId
-                && end - start + 1 < 16)
+                && end - start + 1 < maxParagraphs
+                && batchCharacters + Math.Min(
+                    paragraphs[end + 1].Text.Length,
+                    _semanticOptions.MaxInputCharacters) <= _semanticOptions.MaxInputCharacters)
+            {
                 end++;
+                batchCharacters += Math.Min(
+                    paragraphs[end].Text.Length, _semanticOptions.MaxInputCharacters);
+            }
 
             if (end > start)
             {
@@ -178,7 +191,12 @@ public sealed class SemanticChunkingService(
                     .LastOrDefault()?.Title;
                 var batch = paragraphs.Skip(start).Take(end - start + 1)
                     .Select(x => new SemanticParagraphInput(
-                        x.Order, x.Text, x.IsHeading, sectionTitle))
+                        x.Order,
+                        x.Text.Length > _semanticOptions.MaxInputCharacters
+                            ? x.Text[.._semanticOptions.MaxInputCharacters]
+                            : x.Text,
+                        x.IsHeading,
+                        sectionTitle))
                     .ToArray();
 
                 var boundaries = await boundaryDetector.DetectBoundariesAsync(
