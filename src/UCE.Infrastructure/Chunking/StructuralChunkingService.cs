@@ -45,6 +45,16 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
         {
             if (current.Count == 0) return;
 
+            // A section title without any body is structural metadata, not a
+            // useful retrieval chunk. Keep it pending until body text arrives.
+            if (current.All(x => x.IsHeading))
+            {
+                current.Clear();
+                currentTokens = 0;
+                overlapText = string.Empty;
+                return;
+            }
+
             var body = string.Join(
                 Environment.NewLine + Environment.NewLine,
                 current.Select(x => x.Text));
@@ -130,7 +140,10 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
                 currentTokens += paragraphTokens;
 
                 var actualTokens = currentTokens + counter.Count(overlapText);
-                if (actualTokens >= options.TargetChunkTokens
+                // Do not split a heading away from its following body merely
+                // because the heading itself reaches the target token count.
+                if (current.Any(x => !x.IsHeading)
+                    && actualTokens >= options.TargetChunkTokens
                     && currentTokens >= options.MinChunkTokens)
                 {
                     Flush();
