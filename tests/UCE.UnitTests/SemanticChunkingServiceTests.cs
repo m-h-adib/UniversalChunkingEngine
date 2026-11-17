@@ -40,7 +40,7 @@ public sealed class SemanticChunkingServiceTests
             chunks[0].Content);
         Assert.Equal("موضوع مستقل دوم و توضیح آن.", chunks[1].Content);
         Assert.Equal(0, chunks[0].StartPosition);
-        Assert.Equal(59, chunks[0].EndPosition);
+        Assert.Equal(structure.Paragraphs[1].EndPosition, chunks[0].EndPosition);
     }
 
     private static DocumentParagraph Paragraph(int order, string text, int start) => new()
