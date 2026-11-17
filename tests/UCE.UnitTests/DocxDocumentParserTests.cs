@@ -1,5 +1,7 @@
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
+using System.IO.Compression;
+using System.Text;
 using W = DocumentFormat.OpenXml.Wordprocessing;
 using UCE.Application.Documents.Abstractions;
 using UCE.Infrastructure.Documents.Parsing;
@@ -60,11 +62,11 @@ public sealed class DocxDocumentParserTests
             new W.Run(new W.Text("متن قبل")),
             new W.Run(new W.TabChar()),
             new W.Run(new W.Text("متن بعد")),
-            new W.Run(OpenXmlUnknownElement.CreateOpenXmlUnknownElement(drawingXml)),
             new W.Run(new W.Break()),
             new W.Run(new W.Text("سطر دوم")));
 
         using var stream = CreateDocument(paragraph);
+        InjectDrawingMetadata(stream, drawingXml);
         var parser = new DocxDocumentParser(new StubLanguageDetector());
         var result = await parser.ParseAsync(stream, "sample.docx");
 
@@ -86,11 +88,10 @@ public sealed class DocxDocumentParserTests
         var table = new W.Table(
             new W.TableRow(
                 new W.TableCell(
-                    new W.Paragraph(
-                        new W.Run(new W.Text("متن سلول")),
-                        new W.Run(OpenXmlUnknownElement.CreateOpenXmlUnknownElement(drawingXml))))));
+                    new W.Paragraph(new W.Run(new W.Text("متن سلول"))))));
 
         using var stream = CreateDocument(table);
+        InjectDrawingMetadata(stream, drawingXml);
         var parser = new DocxDocumentParser(new StubLanguageDetector());
         var result = await parser.ParseAsync(stream, "sample.docx");
 
@@ -98,6 +99,36 @@ public sealed class DocxDocumentParserTests
         Assert.Contains("متن سلول", result.Tables[0].Rows[0].Cells[0].Text);
         Assert.DoesNotContain("-30480", result.Tables[0].Rows[0].Cells[0].Text);
         Assert.DoesNotContain("-30480", result.FullText);
+    }
+
+
+    private static void InjectDrawingMetadata(MemoryStream stream, string drawingXml)
+    {
+        stream.Position = 0;
+
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Update, leaveOpen: true);
+        var documentEntry = archive.GetEntry("word/document.xml")
+            ?? throw new InvalidDataException("DOCX document.xml is missing.");
+
+        string documentXml;
+        using (var reader = new StreamReader(documentEntry.Open()))
+            documentXml = reader.ReadToEnd();
+
+        documentEntry.Delete();
+
+        var updatedEntry = archive.CreateEntry("word/document.xml");
+        using (var writer = new StreamWriter(updatedEntry.Open(), new UTF8Encoding(false)))
+        {
+            var drawingRun = "<w:r>" + drawingXml + "</w:r>";
+            var updatedXml = documentXml.Replace(
+                "</w:p>",
+                drawingRun + "</w:p>",
+                StringComparison.Ordinal);
+
+            writer.Write(updatedXml);
+        }
+
+        stream.Position = 0;
     }
 
     private static MemoryStream CreateDocument(params OpenXmlElement[] elements)
