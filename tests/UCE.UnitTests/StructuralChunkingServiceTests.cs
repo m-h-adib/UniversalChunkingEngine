@@ -126,4 +126,85 @@ public class StructuralChunkingServiceTests
             chunks[1].SectionPath);
     }
 
+    [Fact]
+    public void DoesNotEmitHeadingOnlySectionsAsRetrievalChunks()
+    {
+        var service = new StructuralChunkingService(new ApproximateTokenCounter());
+        var firstSection = Guid.NewGuid();
+        var secondSection = Guid.NewGuid();
+        var structure = new DocumentStructure();
+
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 0,
+            Text = "فصل اول: عنوان بدون متن",
+            StartPosition = 0,
+            EndPosition = 24,
+            SectionId = firstSection,
+            IsHeading = true,
+            Type = ContentBlockType.Heading
+        });
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 1,
+            Text = "فصل دوم: عنوان دارای متن",
+            StartPosition = 26,
+            EndPosition = 50,
+            SectionId = secondSection,
+            IsHeading = true,
+            Type = ContentBlockType.Heading
+        });
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 2,
+            Text = "این متن بدنه فصل دوم است",
+            StartPosition = 52,
+            EndPosition = 78,
+            SectionId = secondSection,
+            Type = ContentBlockType.Paragraph
+        });
+
+        var chunks = service.CreateChunks(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Structural,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 1,
+            MaxChunkTokens = 40,
+            OverlapTokens = 0,
+            PreserveHeadings = true
+        });
+
+        var chunk = Assert.Single(chunks);
+        Assert.Contains("فصل دوم: عنوان دارای متن", chunk.Content);
+        Assert.Contains("این متن بدنه فصل دوم است", chunk.Content);
+        Assert.DoesNotContain("فصل اول: عنوان بدون متن", chunk.Content);
+    }
+
+    [Fact]
+    public void PreservesShortStandaloneBodyParagraphs()
+    {
+        var service = new StructuralChunkingService(new ApproximateTokenCounter());
+        var structure = new DocumentStructure();
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 0,
+            Text = "حکم مستقل و کوتاه",
+            StartPosition = 0,
+            EndPosition = 18,
+            Type = ContentBlockType.Paragraph
+        });
+
+        var chunks = service.CreateChunks(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Structural,
+            MinChunkTokens = 200,
+            TargetChunkTokens = 450,
+            MaxChunkTokens = 700,
+            OverlapTokens = 0
+        });
+
+        var chunk = Assert.Single(chunks);
+        Assert.Equal("حکم مستقل و کوتاه", chunk.Content);
+    }
+
 }
