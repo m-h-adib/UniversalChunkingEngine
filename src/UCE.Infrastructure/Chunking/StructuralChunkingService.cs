@@ -56,13 +56,27 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
             var pages = current.Where(x => x.PageNumber.HasValue)
                 .Select(x => x.PageNumber!.Value).ToList();
 
+            var sectionId = current[0].SectionId;
+            var sectionPath = FindSectionPath(structure.Sections, sectionId)
+                .Where(x => x.Level > 0)
+                .ToList();
+            var section = sectionPath.LastOrDefault();
+            var parentSection = sectionPath.Count > 1
+                ? sectionPath[^2]
+                : null;
+
             result.Add(new ChunkDto
             {
                 Order = result.Count,
                 Content = content,
                 TokenCount = counter.Count(content),
-                SectionId = current[0].SectionId,
-                SectionTitle = FindSectionTitle(structure.Sections, current[0].SectionId),
+                SectionId = sectionId,
+                SectionTitle = section?.Title
+                    ?? FindSectionTitle(structure.Sections, sectionId),
+                SectionLevel = section?.Level,
+                ParentSectionId = parentSection?.Id,
+                ParentSectionTitle = parentSection?.Title,
+                SectionPath = sectionPath.Select(x => x.Title).ToList(),
                 StartPosition = current.Min(x => x.StartPosition),
                 EndPosition = current.Max(x => x.EndPosition),
                 StartPage = pages.Count > 0 ? pages.Min() : null,
@@ -86,12 +100,14 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
             foreach (var paragraph in SplitIfRequired(original, options))
             {
                 var paragraphTokens = counter.Count(paragraph.Text);
-                var headingBoundary = options.PreserveHeadings
-                    && paragraph.IsHeading && current.Count > 0;
 
-                if (headingBoundary)
+                // A heading starts a new structural context. Clear overlap even when
+                // the previous chunk was already flushed by the token target.
+                if (options.PreserveHeadings && paragraph.IsHeading)
                 {
-                    Flush();
+                    if (current.Count > 0)
+                        Flush();
+
                     overlapText = string.Empty;
                 }
 
@@ -257,6 +273,29 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
         }
 
         return suffix;
+    }
+
+    private static List<DocumentStructureSection> FindSectionPath(
+        IEnumerable<DocumentStructureSection> sections,
+        Guid? id)
+    {
+        if (!id.HasValue)
+            return [];
+
+        foreach (var section in sections)
+        {
+            if (section.Id == id.Value)
+                return [section];
+
+            var childPath = FindSectionPath(section.Children, id);
+            if (childPath.Count > 0)
+            {
+                childPath.Insert(0, section);
+                return childPath;
+            }
+        }
+
+        return [];
     }
 
     private static string? FindSectionTitle(
