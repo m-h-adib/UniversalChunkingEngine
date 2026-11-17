@@ -67,6 +67,14 @@ public sealed class SemanticChunkingService(
             if (current.Count == 0)
                 return;
 
+            if (current.All(x => x.IsHeading))
+            {
+                current.Clear();
+                currentTokens = 0;
+                overlap = string.Empty;
+                return;
+            }
+
             var body = string.Join(
                 Environment.NewLine + Environment.NewLine,
                 current.Select(x => x.Text));
