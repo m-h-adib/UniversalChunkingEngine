@@ -24,6 +24,24 @@ public sealed class OllamaSemanticBoundaryDetectorTests
     }
 
     [Fact]
+    public async Task SendsPersianParagraphTextWithoutUnicodeEscaping()
+    {
+        var handler = new QueueHandler("""{"splitAfter":[]}""");
+        var detector = CreateDetector(handler);
+
+        await detector.DetectBoundariesAsync(Paragraphs(2));
+
+        using var request = JsonDocument.Parse(handler.LastRequest);
+        var userPrompt = request.RootElement
+            .GetProperty("messages")[1]
+            .GetProperty("content")
+            .GetString();
+
+        Assert.Contains("متن پاراگراف", userPrompt);
+        Assert.DoesNotContain("\\u", userPrompt);
+    }
+
+    [Fact]
     public async Task RetriesWhenModelOmitsSplitAfter()
     {
         var handler = new QueueHandler(
