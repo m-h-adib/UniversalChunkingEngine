@@ -8,7 +8,7 @@ namespace UCE.Infrastructure.Chunking;
 public sealed class StructuralChunkingService(ITokenCounter counter) : IChunkingService
 {
     private static readonly Regex TokenPattern =
-        new(@"\\w+|[^\\s]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+        new(@"\w+|[^\s]", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public IReadOnlyList<ChunkDto> CreateChunks(
         DocumentStructure structure,
@@ -153,7 +153,7 @@ public sealed class StructuralChunkingService(ITokenCounter counter) : IChunking
         if (counter.Count(text) <= splitLimit)
             return [paragraph];
 
-        var words = Regex.Matches(text, @"\\S+");
+        var words = Regex.Matches(text, @"\S+");
         var pieces = new List<DocumentParagraph>();
         var buffer = new List<string>();
         var bufferStart = 0;
