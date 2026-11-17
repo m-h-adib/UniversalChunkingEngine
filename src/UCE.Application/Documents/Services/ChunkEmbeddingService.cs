@@ -5,7 +5,7 @@ using UCE.Domain.Enums;
 namespace UCE.Application.Documents.Services;
 
 /// <summary>
-/// Coordinates structural chunking and vector generation without changing chunk content.
+/// Coordinates structural or LLM-semantic chunking and vector generation without changing chunk content.
 /// </summary>
 public sealed class ChunkEmbeddingService
 {
