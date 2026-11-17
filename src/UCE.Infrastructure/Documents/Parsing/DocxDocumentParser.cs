@@ -1,4 +1,5 @@
 using DocumentFormat.OpenXml.Packaging;
+using System.Text;
 using W = DocumentFormat.OpenXml.Wordprocessing;
 using UCE.Application.Documents.Abstractions;
 using UCE.Application.Documents.Models;
@@ -53,7 +54,7 @@ public sealed class DocxDocumentParser(ITextLanguageDetector languageDetector) :
                     continue;
                 }
 
-                var text = paragraph.InnerText?.Trim() ?? string.Empty;
+                var text = ExtractParagraphText(paragraph);
                 if (text.Length > 0)
                 {
                     var paragraphIndex = document.ParsedParagraphs.Count;
@@ -131,12 +132,41 @@ public sealed class DocxDocumentParser(ITextLanguageDetector languageDetector) :
         // In Open XML, w:instrText is represented by FieldCode.
         var fieldInstructions = string.Join(" ",
             paragraph.Descendants<W.FieldCode>().Select(x => x.Text));
-        var searchable = string.Concat(paragraph.InnerText, " ", fieldInstructions);
+        var searchable = string.Concat(ExtractParagraphText(paragraph), " ", fieldInstructions);
 
         return searchable.Contains("PAGEREF", StringComparison.OrdinalIgnoreCase)
             || searchable.Contains("_Toc", StringComparison.OrdinalIgnoreCase)
             || fieldInstructions.Contains(" TOC ", StringComparison.OrdinalIgnoreCase)
             || fieldInstructions.StartsWith("TOC ", StringComparison.OrdinalIgnoreCase);
+    }
+
+
+    /// <summary>
+    /// Reads WordprocessingML text only. OpenXML's InnerText also includes
+    /// non-text DrawingML values such as floating-image coordinates.
+    /// </summary>
+    private static string ExtractParagraphText(W.Paragraph paragraph)
+    {
+        var builder = new StringBuilder();
+
+        foreach (var node in paragraph.Descendants())
+        {
+            switch (node)
+            {
+                case W.Text text:
+                    builder.Append(text.Text);
+                    break;
+                case W.TabChar:
+                    builder.Append('\t');
+                    break;
+                case W.Break:
+                case W.CarriageReturn:
+                    builder.AppendLine();
+                    break;
+            }
+        }
+
+        return builder.ToString().Trim();
     }
 
     private static void AdvancePageMarkers(
@@ -169,7 +199,7 @@ public sealed class DocxDocumentParser(ITextLanguageDetector languageDetector) :
             foreach (var cell in row.Elements<W.TableCell>())
             {
                 var text = string.Join(Environment.NewLine,
-                    cell.Elements<W.Paragraph>().Select(x => x.InnerText)
+                    cell.Elements<W.Paragraph>().Select(ExtractParagraphText)
                         .Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
 
                 var span = Math.Max(1, cell.TableCellProperties?.GridSpan?.Val?.Value ?? 1);
