@@ -1,5 +1,6 @@
 using UCE.Application.Documents.Abstractions;
 using UCE.Application.Documents.Models;
+using UCE.Domain.Enums;
 
 namespace UCE.Application.Documents.Services;
 
@@ -10,13 +11,16 @@ public sealed class ChunkEmbeddingService
 {
     private readonly IChunkingService _chunkingService;
     private readonly IEmbeddingGenerator _embeddingGenerator;
+    private readonly ISemanticChunkingService? _semanticChunkingService;
 
     public ChunkEmbeddingService(
         IChunkingService chunkingService,
-        IEmbeddingGenerator embeddingGenerator)
+        IEmbeddingGenerator embeddingGenerator,
+        ISemanticChunkingService? semanticChunkingService = null)
     {
         _chunkingService = chunkingService;
         _embeddingGenerator = embeddingGenerator;
+        _semanticChunkingService = semanticChunkingService;
     }
 
     public async Task<IReadOnlyList<EmbeddedChunkDto>> CreateEmbeddedChunksAsync(
@@ -27,7 +31,18 @@ public sealed class ChunkEmbeddingService
         ArgumentNullException.ThrowIfNull(structure);
         ArgumentNullException.ThrowIfNull(options);
 
-        var chunks = _chunkingService.CreateChunks(structure, options);
+        IReadOnlyList<ChunkDto> chunks;
+        if (options.Strategy is ChunkingStrategy.Semantic or ChunkingStrategy.Hybrid)
+        {
+            if (_semanticChunkingService is null)
+                throw new InvalidOperationException("Semantic chunking service is not registered.");
+            chunks = await _semanticChunkingService.CreateChunksAsync(
+                structure, options, cancellationToken);
+        }
+        else
+        {
+            chunks = _chunkingService.CreateChunks(structure, options);
+        }
         if (chunks.Count == 0)
         {
             return [];
