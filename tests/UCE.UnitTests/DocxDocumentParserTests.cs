@@ -106,26 +106,28 @@ public sealed class DocxDocumentParserTests
     {
         stream.Position = 0;
 
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Update, leaveOpen: true);
-        var documentEntry = archive.GetEntry("word/document.xml")
-            ?? throw new InvalidDataException("DOCX document.xml is missing.");
-
-        string documentXml;
-        using (var reader = new StreamReader(documentEntry.Open()))
-            documentXml = reader.ReadToEnd();
-
-        documentEntry.Delete();
-
-        var updatedEntry = archive.CreateEntry("word/document.xml");
-        using (var writer = new StreamWriter(updatedEntry.Open(), new UTF8Encoding(false)))
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Update, leaveOpen: true))
         {
-            var drawingRun = "<w:r>" + drawingXml + "</w:r>";
-            var updatedXml = documentXml.Replace(
-                "</w:p>",
-                drawingRun + "</w:p>",
-                StringComparison.Ordinal);
+            var documentEntry = archive.GetEntry("word/document.xml")
+                ?? throw new InvalidDataException("DOCX document.xml is missing.");
 
-            writer.Write(updatedXml);
+            string documentXml;
+            using (var reader = new StreamReader(documentEntry.Open()))
+                documentXml = reader.ReadToEnd();
+
+            documentEntry.Delete();
+
+            var updatedEntry = archive.CreateEntry("word/document.xml");
+            using (var writer = new StreamWriter(updatedEntry.Open(), new UTF8Encoding(false)))
+            {
+                var drawingRun = "<w:r>" + drawingXml + "</w:r>";
+                var updatedXml = documentXml.Replace(
+                    "</w:p>",
+                    drawingRun + "</w:p>",
+                    StringComparison.Ordinal);
+
+                writer.Write(updatedXml);
+            }
         }
 
         stream.Position = 0;
