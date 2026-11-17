@@ -147,7 +147,7 @@ public sealed class SemanticChunkingService(
                     && currentTokens + tokenCounter.Count(overlap) + pieceTokens > options.MaxChunkTokens)
                 {
                     Flush();
-                    overlap = string.Empty;
+                    overlap = TakeTail(overlap, Math.Max(0, options.MaxChunkTokens - pieceTokens));
                 }
 
                 current.Add(piece);
