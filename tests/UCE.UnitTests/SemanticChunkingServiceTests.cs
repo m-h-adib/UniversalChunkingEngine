@@ -43,6 +43,34 @@ public sealed class SemanticChunkingServiceTests
         Assert.Equal(structure.Paragraphs[1].EndPosition, chunks[0].EndPosition);
     }
 
+
+    [Fact]
+    public async Task HybridKeepsStructuralBoundariesEvenWhenLlmFindsNoTopicChange()
+    {
+        var counter = new ApproximateTokenCounter();
+        var service = new SemanticChunkingService(
+            new FakeBoundaryDetector(new HashSet<int>()),
+            new StructuralChunkingService(counter),
+            counter,
+            Options.Create(new SemanticChunkingOptions()));
+        var structure = new DocumentStructure();
+        structure.Paragraphs.Add(Paragraph(0, "این متن نخست است", 0));
+        structure.Paragraphs.Add(Paragraph(1, "این متن دوم است", 20));
+
+        var chunks = await service.CreateChunksAsync(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Hybrid,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 4,
+            MaxChunkTokens = 20,
+            OverlapTokens = 0
+        });
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Equal("این متن نخست است", chunks[0].Content);
+        Assert.Equal("این متن دوم است", chunks[1].Content);
+    }
+
     private static DocumentParagraph Paragraph(int order, string text, int start) => new()
     {
         Order = order,
