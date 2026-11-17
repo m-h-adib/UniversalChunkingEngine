@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using UCE.Application.Documents.Abstractions;
 using UCE.Application.Documents.Models;
@@ -81,6 +82,146 @@ public sealed class QdrantVectorStore : IVectorStore
 
             await EnsureSuccessAsync(response, cancellationToken);
         }
+    }
+
+
+    public async Task<IReadOnlyList<VectorSearchResult>> SearchAsync(
+        float[] vector,
+        Guid? documentId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+
+        if (vector.Length != _options.VectorSize)
+            throw new ArgumentException($"Query vector must contain exactly {_options.VectorSize} values.", nameof(vector));
+
+        if (limit is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be between 1 and 100.");
+
+        object? filter = documentId.HasValue
+            ? new
+            {
+                must = new[]
+                {
+                    new
+                    {
+                        key = "documentId",
+                        match = new { value = documentId.Value }
+                    }
+                }
+            }
+            : null;
+
+        using var request = CreateRequest(
+            HttpMethod.Post,
+            $"collections/{_options.CollectionName}/points/query",
+            new
+            {
+                query = vector,
+                limit,
+                with_payload = true,
+                filter
+            });
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        if (!json.RootElement.TryGetProperty("result", out var resultElement) ||
+            !resultElement.TryGetProperty("points", out var pointsElement) ||
+            pointsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("Qdrant search response does not contain result.points.");
+        }
+
+        var results = new List<VectorSearchResult>();
+        foreach (var point in pointsElement.EnumerateArray())
+        {
+            if (!point.TryGetProperty("payload", out var payload) ||
+                payload.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var mapped = MapSearchResult(point, payload);
+            if (mapped is not null)
+                results.Add(mapped);
+        }
+
+        return results;
+    }
+
+    private static VectorSearchResult? MapSearchResult(
+        JsonElement point,
+        JsonElement payload)
+    {
+        var idText = ReadString(point, "id");
+        if (!Guid.TryParse(idText, out var id))
+            return null;
+
+        var documentIdText = ReadString(payload, "documentId");
+        if (!Guid.TryParse(documentIdText, out var documentId))
+            return null;
+
+        return new VectorSearchResult
+        {
+            Id = id,
+            Score = ReadDouble(point, "score"),
+            DocumentId = documentId,
+            DocumentTitle = ReadString(payload, "documentTitle"),
+            SourceFileName = ReadString(payload, "sourceFileName"),
+            Language = ReadString(payload, "language"),
+            ChunkOrder = ReadInt(payload, "chunkOrder"),
+            Content = ReadString(payload, "content") ?? string.Empty,
+            TokenCount = ReadInt(payload, "tokenCount"),
+            OverlapTokenCount = ReadInt(payload, "overlapTokenCount"),
+            SectionId = ReadNullableGuid(payload, "sectionId"),
+            SectionTitle = ReadString(payload, "sectionTitle"),
+            SectionLevel = ReadNullableInt(payload, "sectionLevel"),
+            SectionDepth = ReadInt(payload, "sectionDepth"),
+            ParentSectionId = ReadNullableGuid(payload, "parentSectionId"),
+            ParentSectionTitle = ReadString(payload, "parentSectionTitle"),
+            SectionPath = ReadStringArray(payload, "sectionPath"),
+            StartPosition = ReadInt(payload, "startPosition"),
+            EndPosition = ReadInt(payload, "endPosition"),
+            StartPage = ReadNullableInt(payload, "startPage"),
+            EndPage = ReadNullableInt(payload, "endPage"),
+            DominantBlockType = ReadString(payload, "dominantBlockType")
+        };
+    }
+
+    private static string? ReadString(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static int ReadInt(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.TryGetInt32(out var number)
+            ? number
+            : 0;
+
+    private static int? ReadNullableInt(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number &&
+        value.TryGetInt32(out var number) ? number : null;
+
+    private static double ReadDouble(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.TryGetDouble(out var number)
+            ? number
+            : 0d;
+
+    private static Guid? ReadNullableGuid(JsonElement element, string name) =>
+        Guid.TryParse(ReadString(element, name), out var value) ? value : null;
+
+    private static IReadOnlyList<string> ReadStringArray(JsonElement element, string name)
+    {
+        if (!element.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Array)
+            return [];
+
+        return value.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString()!)
+            .ToArray();
     }
 
     private async Task EnsureCollectionAsync(CancellationToken cancellationToken)

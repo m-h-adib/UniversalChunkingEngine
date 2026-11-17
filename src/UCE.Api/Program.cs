@@ -190,6 +190,49 @@ app.MapPost("/api/documents/index",
     })
     .DisableAntiforgery().WithName("IndexDocument").WithTags("Documents");
 
+
+app.MapPost("/api/documents/search",
+    async Task<IResult> (
+        DocumentSearchRequest request,
+        DocumentSearchService searchService,
+        CancellationToken ct) =>
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Query))
+            return Results.BadRequest(new { error = "متن پرس‌وجو الزامی است." });
+
+        if (request.Limit is < 1 or > 100)
+            return Results.BadRequest(new { error = "Limit باید بین ۱ تا ۱۰۰ باشد." });
+
+        try
+        {
+            var results = await searchService.SearchAsync(request, ct);
+            return Results.Ok(new
+            {
+                request.Query,
+                request.DocumentId,
+                request.Limit,
+                ResultCount = results.Count,
+                EmbeddingModel = "BAAI/bge-m3",
+                Results = results
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            return Results.Problem(
+                title: "ارتباط با سرویس BGE-M3 یا Qdrant برقرار نشد.",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(
+                title: "پاسخ یکی از سرویس‌های زیرساخت معتبر نیست.",
+                detail: ex.Message,
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    })
+    .WithName("SearchDocuments").WithTags("Documents");
+
 app.Run();
 
 public partial class Program
