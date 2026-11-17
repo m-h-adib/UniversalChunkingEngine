@@ -5,6 +5,7 @@ using UCE.Application.Documents.Models;
 using UCE.Application.Documents.Services;
 using UCE.Application.Documents.Abstractions;
 using UCE.Infrastructure;
+using UCE.Domain.Enums;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
@@ -65,8 +66,9 @@ app.MapPost("/api/documents/analyze",
 app.MapPost("/api/documents/chunk",
     async Task<IResult> (
         IFormFile file, DocumentImportService importer, IChunkingService chunker,
+        ISemanticChunkingService semanticChunker,
         CancellationToken ct, [FromForm] int? targetTokens, [FromForm] int? maxTokens,
-        [FromForm] int? overlapTokens) =>
+        [FromForm] int? overlapTokens, [FromForm] ChunkingStrategy? strategy) =>
     {
         if (file is null || file.Length == 0)
             return Results.BadRequest(new { error = "فایل خالی است." });
@@ -75,6 +77,7 @@ app.MapPost("/api/documents/chunk",
 
         var options = new ChunkingOptions
         {
+            Strategy = strategy ?? ChunkingStrategy.Adaptive,
             TargetChunkTokens = targetTokens ?? 450,
             MaxChunkTokens = maxTokens ?? 700,
             OverlapTokens = overlapTokens ?? 60
@@ -84,7 +87,9 @@ app.MapPost("/api/documents/chunk",
         try
         {
             var (doc, structure) = await importer.ImportAsync(stream, file.FileName, ct);
-            var chunks = chunker.CreateChunks(structure, options);
+            var chunks = options.Strategy is ChunkingStrategy.Semantic or ChunkingStrategy.Hybrid
+                ? await semanticChunker.CreateChunksAsync(structure, options, ct)
+                : chunker.CreateChunks(structure, options);
             return Results.Ok(new { doc.Title, doc.Language, ChunkCount = chunks.Count, Chunks = chunks });
         }
         catch (NotSupportedException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -96,7 +101,7 @@ app.MapPost("/api/documents/chunk-embed",
     async Task<IResult> (
         IFormFile file, DocumentImportService importer, ChunkEmbeddingService embeddingService,
         CancellationToken ct, [FromForm] int? targetTokens, [FromForm] int? maxTokens,
-        [FromForm] int? overlapTokens) =>
+        [FromForm] int? overlapTokens, [FromForm] ChunkingStrategy? strategy) =>
     {
         if (file is null || file.Length == 0)
             return Results.BadRequest(new { error = "فایل خالی است." });
@@ -105,6 +110,7 @@ app.MapPost("/api/documents/chunk-embed",
 
         var options = new ChunkingOptions
         {
+            Strategy = strategy ?? ChunkingStrategy.Adaptive,
             TargetChunkTokens = targetTokens ?? 450,
             MaxChunkTokens = maxTokens ?? 700,
             OverlapTokens = overlapTokens ?? 60
@@ -143,7 +149,7 @@ app.MapPost("/api/documents/index",
     async Task<IResult> (
         IFormFile file, DocumentImportService importer, DocumentIndexingService indexingService,
         CancellationToken ct, [FromForm] int? targetTokens, [FromForm] int? maxTokens,
-        [FromForm] int? overlapTokens) =>
+        [FromForm] int? overlapTokens, [FromForm] ChunkingStrategy? strategy) =>
     {
         if (file is null || file.Length == 0)
             return Results.BadRequest(new { error = "فایل خالی است." });
@@ -152,6 +158,7 @@ app.MapPost("/api/documents/index",
 
         var options = new ChunkingOptions
         {
+            Strategy = strategy ?? ChunkingStrategy.Adaptive,
             TargetChunkTokens = targetTokens ?? 450,
             MaxChunkTokens = maxTokens ?? 700,
             OverlapTokens = overlapTokens ?? 60
