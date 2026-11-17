@@ -46,6 +46,60 @@ public sealed class DocxDocumentParserTests
         Assert.Equal(2, result.ParsedParagraphs[1].PageNumber);
     }
 
+
+    [Fact]
+    public async Task ExtractsWordTextButIgnoresFloatingImageCoordinates()
+    {
+        const string drawingXml =
+            "<w:drawing xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" " +
+            "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">" +
+            "<wp:anchor><wp:positionH><wp:posOffset>397530</wp:posOffset></wp:positionH>" +
+            "<wp:positionV><wp:posOffset>236771</wp:posOffset></wp:positionV></wp:anchor></w:drawing>";
+
+        var paragraph = new W.Paragraph(
+            new W.Run(new W.Text("متن قبل")),
+            new W.Run(new W.TabChar()),
+            new W.Run(new W.Text("متن بعد")),
+            new W.Run(OpenXmlUnknownElement.CreateOpenXmlUnknownElement(drawingXml)),
+            new W.Run(new W.Break()),
+            new W.Run(new W.Text("سطر دوم")));
+
+        using var stream = CreateDocument(paragraph);
+        var parser = new DocxDocumentParser(new StubLanguageDetector());
+        var result = await parser.ParseAsync(stream, "sample.docx");
+
+        Assert.Single(result.ParsedParagraphs);
+        Assert.Equal("متن قبل\tمتن بعد" + Environment.NewLine + "سطر دوم",
+            result.ParsedParagraphs[0].Text);
+        Assert.DoesNotContain("397530", result.FullText);
+        Assert.DoesNotContain("236771", result.FullText);
+    }
+
+    [Fact]
+    public async Task IgnoresFloatingImageCoordinatesInsideTableCells()
+    {
+        const string drawingXml =
+            "<w:drawing xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" " +
+            "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">" +
+            "<wp:anchor><wp:positionH><wp:posOffset>-30480</wp:posOffset></wp:positionH></wp:anchor></w:drawing>";
+
+        var table = new W.Table(
+            new W.TableRow(
+                new W.TableCell(
+                    new W.Paragraph(
+                        new W.Run(new W.Text("متن سلول")),
+                        new W.Run(OpenXmlUnknownElement.CreateOpenXmlUnknownElement(drawingXml))))));
+
+        using var stream = CreateDocument(table);
+        var parser = new DocxDocumentParser(new StubLanguageDetector());
+        var result = await parser.ParseAsync(stream, "sample.docx");
+
+        Assert.Single(result.Tables);
+        Assert.Contains("متن سلول", result.Tables[0].Rows[0].Cells[0].Text);
+        Assert.DoesNotContain("-30480", result.Tables[0].Rows[0].Cells[0].Text);
+        Assert.DoesNotContain("-30480", result.FullText);
+    }
+
     private static MemoryStream CreateDocument(params OpenXmlElement[] elements)
     {
         var stream = new MemoryStream();
