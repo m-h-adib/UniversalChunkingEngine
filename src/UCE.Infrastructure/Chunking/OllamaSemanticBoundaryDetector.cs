@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using Microsoft.Extensions.Options;
 using UCE.Application.Documents.Abstractions;
 
@@ -53,7 +54,13 @@ public sealed class OllamaSemanticBoundaryDetector(
             text = p.Text
         }).ToArray();
 
-        var serializedParagraphs = JsonSerializer.Serialize(payload);
+        // Keep Persian text readable inside the prompt. The default JSON encoder
+        // escapes non-ASCII characters, which makes small local models see long
+        // sequences such as \\u0627 instead of natural Persian text.
+        var serializedParagraphs = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        });
         var firstPrompt = """
             Identify topic changes in these numbered paragraphs.
             Return a JSON object with one property: splitAfter.
