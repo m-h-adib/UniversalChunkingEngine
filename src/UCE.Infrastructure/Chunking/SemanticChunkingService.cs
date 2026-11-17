@@ -37,10 +37,20 @@ public sealed class SemanticChunkingService(
         var semanticBoundaries = await DetectAllBoundariesAsync(
             structure, paragraphs, cancellationToken);
 
+        var structuralOptions = new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Structural,
+            MinChunkTokens = options.MinChunkTokens,
+            TargetChunkTokens = options.TargetChunkTokens,
+            MaxChunkTokens = options.MaxChunkTokens,
+            OverlapTokens = options.OverlapTokens,
+            PreserveHeadings = options.PreserveHeadings,
+            PreserveParagraphs = options.PreserveParagraphs
+        };
         var structuralEnds = options.Strategy == ChunkingStrategy.Hybrid
-            ? structuralChunker.CreateChunks(structure, options)
+            ? structuralChunker.CreateChunks(structure, structuralOptions)
                 .Select(x => x.EndPosition).ToHashSet()
-            : [];
+            : new HashSet<int>();
 
         var chunks = new List<ChunkDto>();
         var current = new List<DocumentParagraph>();
@@ -119,6 +129,9 @@ public sealed class SemanticChunkingService(
             foreach (var piece in SplitOversized(paragraph, options.MaxChunkTokens))
             {
                 var pieceTokens = tokenCounter.Count(piece.Text);
+                if (tokenCounter.Count(overlap) + pieceTokens > options.MaxChunkTokens)
+                    overlap = TakeTail(overlap, Math.Max(0, options.MaxChunkTokens - pieceTokens));
+
                 if (current.Count > 0
                     && currentTokens + tokenCounter.Count(overlap) + pieceTokens > options.MaxChunkTokens)
                 {
@@ -194,7 +207,6 @@ public sealed class SemanticChunkingService(
 
         var pieces = new List<DocumentParagraph>();
         var buffer = new List<Match>();
-        var pieceStart = 0;
 
         void Flush()
         {
