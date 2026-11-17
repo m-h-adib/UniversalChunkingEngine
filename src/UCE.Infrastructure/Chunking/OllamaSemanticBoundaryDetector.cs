@@ -16,18 +16,15 @@ public sealed class OllamaSemanticBoundaryDetector(
     private readonly SemanticChunkingOptions _options = options.Value;
 
     private const string SystemPrompt = """
-        You are a semantic document segmentation engine.
-        Find only meaningful topic changes between consecutive paragraphs.
-        Keep explanations, examples, evidence, conditions and exceptions with
-        the topic they explain. A heading starts a new topic when appropriate.
-        Return a JSON object with exactly one property named splitAfter.
-        splitAfter is an array of zero-based paragraph indexes. An index N means
-        a new topic starts at paragraph N+1. Do not include the final paragraph
-        index. Return [] when there is no topic change.
-        Do not summarize, rewrite, translate or reproduce the paragraph text.
+        You split a document into coherent topics.
+        Return only JSON: {"splitAfter":[]}
+        splitAfter contains zero-based paragraph indexes. Index N means a new
+        topic starts at paragraph N+1. Do not include the final paragraph index.
+        Keep explanations, examples and evidence with the topic they explain.
+        Never rewrite or summarize paragraph text.
         """;
 
-    private static readonly object ResponseFormat = new
+    private static readonly object ResponseSchema = new
     {
         type = "object",
         properties = new
@@ -49,57 +46,58 @@ public sealed class OllamaSemanticBoundaryDetector(
         if (paragraphs.Count < 2)
             return new HashSet<int>();
 
-        var payload = new
+        var payload = paragraphs.Select((p, index) => new
         {
-            paragraphs = paragraphs.Select((p, index) => new
-            {
-                index,
-                isHeading = p.IsHeading,
-                section = p.SectionTitle,
-                text = p.Text
-            })
-        };
+            index,
+            heading = p.IsHeading,
+            text = p.Text
+        }).ToArray();
 
-        var userContent = """
-            Decide where the subject changes in this ordered list of paragraphs.
-            Consider the meaning of each paragraph in relation to its neighbors.
-            Output only the required JSON object.
-            """;
+        var serializedParagraphs = JsonSerializer.Serialize(payload);
+        var firstPrompt = """
+            Identify topic changes in these numbered paragraphs.
+            Return a JSON object with one property: splitAfter.
+            """ + Environment.NewLine + serializedParagraphs;
 
         var firstResponse = await RequestAsync(
-            userContent + Environment.NewLine + JsonSerializer.Serialize(payload),
-            cancellationToken);
+            firstPrompt, useJsonSchema: true, cancellationToken);
 
         if (TryParseBoundaries(firstResponse, paragraphs.Count, out var boundaries, out var error))
             return boundaries;
 
-        // Small local models occasionally ignore the requested schema. Retry once
-        // with a compact correction request; never silently switch chunking modes.
-        var retryContent = $$"""
-            Your previous answer was invalid: {{error}}
-            Correct the answer using the paragraph list below.
-            Return ONLY this JSON shape: {"splitAfter":[]}
-            splitAfter must contain zero-based integer indexes from 0 to {{paragraphs.Count - 2}}.
-            Do not include the final paragraph index or any other property.
+        // Gemma 3 1B can struggle with constrained JSON schemas. Retry using
+        // Ollama's simpler JSON mode and a shorter instruction.
+        var retryPrompt = $$"""
+            Output only valid JSON in this exact shape:
+            {"splitAfter":[]}
+            splitAfter is an array of zero-based integers. A value N means
+            a new topic begins at paragraph N+1. Valid values: 0 through {{paragraphs.Count - 2}}.
+            Keep related explanations together. Do not output prose.
             Paragraphs:
-            {{JsonSerializer.Serialize(payload)}}
+            {{serializedParagraphs}}
             """;
 
-        var retryResponse = await RequestAsync(retryContent, cancellationToken);
+        var retryResponse = await RequestAsync(
+            retryPrompt, useJsonSchema: false, cancellationToken);
+
         if (TryParseBoundaries(retryResponse, paragraphs.Count, out boundaries, out error))
             return boundaries;
 
         throw new InvalidOperationException(
-            $"Ollama returned an invalid semantic-boundary response after one retry: {error}");
+            $"Ollama returned an invalid semantic-boundary response after JSON-mode retry: {error}. " +
+            $"Model response: {CreateDiagnosticExcerpt(retryResponse)}");
     }
 
-    private async Task<string> RequestAsync(string userContent, CancellationToken cancellationToken)
+    private async Task<string> RequestAsync(
+        string userContent,
+        bool useJsonSchema,
+        CancellationToken cancellationToken)
     {
         var request = new
         {
             model = _options.Model,
             stream = false,
-            format = ResponseFormat,
+            format = useJsonSchema ? ResponseSchema : (object)"json",
             messages = new[]
             {
                 new { role = "system", content = SystemPrompt },
@@ -133,8 +131,6 @@ public sealed class OllamaSemanticBoundaryDetector(
             return false;
         }
 
-        // Be tolerant of markdown fences or a short preamble, while still
-        // requiring a valid JSON object with the exact contract.
         var jsonStart = content.IndexOf('{');
         var jsonEnd = content.LastIndexOf('}');
         if (jsonStart < 0 || jsonEnd <= jsonStart)
@@ -181,6 +177,19 @@ public sealed class OllamaSemanticBoundaryDetector(
             error = "response contained malformed JSON";
             return false;
         }
+    }
+
+    private static string CreateDiagnosticExcerpt(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+            return "<empty>";
+
+        const int maxLength = 400;
+        var excerpt = content.Length <= maxLength
+            ? content
+            : content[..maxLength] + "...";
+
+        return JsonSerializer.Serialize(excerpt);
     }
 
     private sealed class OllamaChatResponse
