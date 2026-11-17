@@ -7,6 +7,14 @@ public sealed class ChunkDto
     public int Order { get; set; }
     public string Content { get; set; } = string.Empty;
     public int TokenCount { get; set; }
+
+    /// <summary>
+    /// Number of tokens at the beginning of Content repeated from the previous
+    /// chunk for retrieval context. These tokens are not part of this chunk's
+    /// StartPosition/EndPosition source range.
+    /// </summary>
+    public int OverlapTokenCount { get; set; }
+
     public int CharacterCount => Content.Length;
 
     public Guid? SectionId { get; set; }
@@ -31,7 +39,16 @@ public sealed class ChunkDto
     /// </summary>
     public List<string> SectionPath { get; set; } = [];
 
+    /// <summary>
+    /// Start offset in the original document for source text owned by this chunk.
+    /// Repeated overlap text at the beginning of Content is excluded.
+    /// </summary>
     public int StartPosition { get; set; }
+
+    /// <summary>
+    /// End offset in the original document for source text owned by this chunk.
+    /// Repeated overlap text at the beginning of Content is excluded.
+    /// </summary>
     public int EndPosition { get; set; }
     public int? StartPage { get; set; }
     public int? EndPage { get; set; }
