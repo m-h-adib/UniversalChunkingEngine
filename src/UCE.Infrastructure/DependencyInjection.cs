@@ -22,6 +22,7 @@ public static class DependencyInjection
         services.Configure<ContentBlockClassifierOptions>(configuration.GetSection("ContentBlockClassifier"));
         services.Configure<BgeM3Options>(configuration.GetSection(BgeM3Options.SectionName));
         services.Configure<QdrantOptions>(configuration.GetSection(QdrantOptions.SectionName));
+        services.Configure<SemanticChunkingOptions>(configuration.GetSection(SemanticChunkingOptions.SectionName));
 
         services.AddSingleton<ITextNormalizer, PersianTextNormalizer>();
         services.AddSingleton<ITextLanguageDetector, TextLanguageDetector>();
@@ -30,6 +31,13 @@ public static class DependencyInjection
         services.AddScoped<IDocumentStructureBuilder, DocumentStructureBuilder>();
         services.AddSingleton<ITokenCounter, ApproximateTokenCounter>();
         services.AddScoped<IChunkingService, StructuralChunkingService>();
+        services.AddScoped<ISemanticChunkingService, SemanticChunkingService>();
+        services.AddHttpClient<ISemanticBoundaryDetector, OllamaSemanticBoundaryDetector>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<IOptions<SemanticChunkingOptions>>().Value;
+            client.BaseAddress = new Uri(options.BaseUrl, UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
         services.AddScoped<ChunkEmbeddingService>();
         services.AddScoped<DocumentIndexingService>();
         services.AddScoped<DocumentSearchService>();
