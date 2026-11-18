@@ -46,6 +46,74 @@ public sealed class SemanticChunkingServiceTests
 
 
     [Fact]
+    public async Task DefersSmallSemanticBoundaryUntilMinimumChunkSizeIsReached()
+    {
+        var counter = new ApproximateTokenCounter();
+        var service = new SemanticChunkingService(
+            new FakeBoundaryDetector(new HashSet<int> { 0, 1 }),
+            new StructuralChunkingService(counter),
+            counter,
+            Options.Create(new SemanticChunkingOptions()));
+        var structure = new DocumentStructure();
+        structure.Paragraphs.Add(Paragraph(0, "الف ب", 0));
+        structure.Paragraphs.Add(Paragraph(1, "ج د", 5));
+        structure.Paragraphs.Add(Paragraph(2, "ه و ز", 10));
+
+        var chunks = await service.CreateChunksAsync(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Semantic,
+            MinChunkTokens = 5,
+            TargetChunkTokens = 10,
+            MaxChunkTokens = 20,
+            OverlapTokens = 0
+        });
+
+        Assert.Single(chunks);
+        Assert.Contains("الف ب", chunks[0].Content);
+        Assert.Contains("ج د", chunks[0].Content);
+        Assert.Contains("ه و ز", chunks[0].Content);
+    }
+
+    [Fact]
+    public async Task SemanticStartsNewChunkBeforeAHeading()
+    {
+        var counter = new ApproximateTokenCounter();
+        var service = new SemanticChunkingService(
+            new FakeBoundaryDetector(new HashSet<int>()),
+            new StructuralChunkingService(counter),
+            counter,
+            Options.Create(new SemanticChunkingOptions()));
+        var structure = new DocumentStructure();
+        structure.Paragraphs.Add(Paragraph(0, "متن موضوع اول", 0));
+        structure.Paragraphs.Add(new DocumentParagraph
+        {
+            Order = 1,
+            Text = "موضوع دوم",
+            StartPosition = 16,
+            EndPosition = 25,
+            IsHeading = true,
+            Type = UCE.Domain.Enums.ContentBlockType.Heading
+        });
+        structure.Paragraphs.Add(Paragraph(2, "توضیح موضوع دوم", 27));
+
+        var chunks = await service.CreateChunksAsync(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Semantic,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 100,
+            MaxChunkTokens = 200,
+            OverlapTokens = 0,
+            PreserveHeadings = true
+        });
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Contains("متن موضوع اول", chunks[0].Content);
+        Assert.DoesNotContain("موضوع دوم", chunks[0].Content);
+        Assert.Contains("موضوع دوم", chunks[1].Content);
+        Assert.Contains("توضیح موضوع دوم", chunks[1].Content);
+    }
+
+    [Fact]
     public async Task SemanticCanKeepRelatedParagraphsAcrossStructuralSections()
     {
         var counter = new ApproximateTokenCounter();
