@@ -20,6 +20,8 @@ public sealed class OllamaSemanticBoundaryDetectorTests
 
         Assert.Equal(new HashSet<int> { 0, 2 }, result);
         Assert.Equal(1, handler.RequestCount);
+        using var request = JsonDocument.Parse(handler.LastRequest);
+        Assert.False(request.RootElement.GetProperty("think").GetBoolean());
         Assert.Contains("\"required\":[\"splitAfter\"]", handler.LastRequest);
     }
 
