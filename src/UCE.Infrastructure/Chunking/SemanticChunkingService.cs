@@ -256,7 +256,7 @@ public sealed class SemanticChunkingService(
         void SplitOversizedSentence(int start, int end)
         {
             var sentence = paragraph.Text[start..end];
-            var words = Regex.Matches(sentence, @"\\S+");
+            var words = Regex.Matches(sentence, @"\S+");
             if (words.Count == 0)
             {
                 AddPiece(start, end);
@@ -288,7 +288,7 @@ public sealed class SemanticChunkingService(
         }
 
         var sentenceEnds = Regex.Matches(
-                paragraph.Text, @"(?<=[.!?؟؛])(?=\\s|$)")
+                paragraph.Text, @"(?<=[.!?؟؛])(?=\s|$)")
             .Select(x => x.Index)
             .Where(x => x > 0 && x < paragraph.Text.Length)
             .Distinct()
