@@ -8,8 +8,8 @@ namespace UCE.Infrastructure.Chunking;
 
 /// <summary>
 /// Plans semantic boundaries with an LLM, then builds chunks from the untouched
-/// source paragraphs. Structural section and heading boundaries are always hard limits.
-/// Hybrid additionally retains the boundaries produced by the structural chunker.
+/// source paragraphs. Headings are hard boundaries; section transitions remain soft
+/// in Semantic mode. Hybrid additionally retains structural section boundaries.
 /// </summary>
 public sealed class SemanticChunkingService(
     ISemanticBoundaryDetector boundaryDetector,
@@ -177,7 +177,11 @@ public sealed class SemanticChunkingService(
                     // Keep accumulating until the minimum size is reached. Hybrid
                     // structural boundaries remain authoritative.
                     if (structuralBoundary || currentTokens >= options.MinChunkTokens)
+                    {
                         Flush();
+                        if (semanticBoundary)
+                            overlap = string.Empty;
+                    }
                 }
             }
         }
