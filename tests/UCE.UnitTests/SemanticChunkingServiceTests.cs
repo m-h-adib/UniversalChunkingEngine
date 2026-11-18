@@ -31,10 +31,11 @@ public sealed class SemanticChunkingServiceTests
             MinChunkTokens = 1,
             TargetChunkTokens = 100,
             MaxChunkTokens = 200,
-            OverlapTokens = 0
+            OverlapTokens = 2
         });
 
         Assert.Equal(2, chunks.Count);
+        Assert.Equal(0, chunks[1].OverlapTokenCount);
         Assert.Equal(
             $"موضوع اول. توضیح اول.{Environment.NewLine}{Environment.NewLine}ادامه همان موضوع با توضیح تکمیلی.",
             chunks[0].Content);
