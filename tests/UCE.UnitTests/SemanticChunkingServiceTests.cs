@@ -121,6 +121,35 @@ public sealed class SemanticChunkingServiceTests
     }
 
     [Fact]
+    public async Task SplitsOversizedParagraphAtSentenceBoundaryBeforeFallingBackToWords()
+    {
+        var counter = new ApproximateTokenCounter();
+        var service = new SemanticChunkingService(
+            new FakeBoundaryDetector(new HashSet<int>()),
+            new StructuralChunkingService(counter),
+            counter,
+            Options.Create(new SemanticChunkingOptions()));
+        var structure = new DocumentStructure();
+        structure.Paragraphs.Add(Paragraph(
+            0,
+            "جمله اول یک دو سه. جمله دوم چهار پنج شش.",
+            0));
+
+        var chunks = await service.CreateChunksAsync(structure, new ChunkingOptions
+        {
+            Strategy = ChunkingStrategy.Semantic,
+            MinChunkTokens = 1,
+            TargetChunkTokens = 100,
+            MaxChunkTokens = 7,
+            OverlapTokens = 0
+        });
+
+        Assert.Equal(2, chunks.Count);
+        Assert.EndsWith("سه.", chunks[0].Content.TrimEnd());
+        Assert.Contains("جمله دوم چهار پنج شش.", chunks[1].Content);
+    }
+
+    [Fact]
     public async Task HybridKeepsStructuralBoundariesEvenWhenLlmFindsNoTopicChange()
     {
         var counter = new ApproximateTokenCounter();
