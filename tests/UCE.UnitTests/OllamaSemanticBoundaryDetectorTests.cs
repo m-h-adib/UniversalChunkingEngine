@@ -40,6 +40,8 @@ public sealed class OllamaSemanticBoundaryDetectorTests
             .GetString();
 
         Assert.Contains("متن پاراگراف", userPrompt);
+        Assert.Contains("sectionTitle", userPrompt);
+        Assert.Contains("بخش", userPrompt);
         Assert.DoesNotContain("\\u", userPrompt);
     }
 
