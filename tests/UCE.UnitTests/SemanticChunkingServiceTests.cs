@@ -91,7 +91,7 @@ public sealed class SemanticChunkingServiceTests
     {
         var counter = new ApproximateTokenCounter();
         var detector = new RecordingBoundaryDetector();
-        var longText = new string('الف', 500);
+        var longText = new string('ا', 500);
         var options = new SemanticChunkingOptions
         {
             MaxParagraphsPerRequest = 2,
