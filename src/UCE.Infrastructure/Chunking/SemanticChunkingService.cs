@@ -166,19 +166,18 @@ public sealed class SemanticChunkingService(
 
                 if (semanticBoundary || structuralBoundary)
                 {
+                    // A semantic boundary separates topics. Remove inherited
+                    // overlap even when this short segment is retained and merged
+                    // forward to satisfy the minimum chunk size.
+                    if (semanticBoundary)
+                        overlap = string.Empty;
+
                     // Avoid tiny retrieval chunks caused by a boundary after a
                     // short qualification, continuation, or one-line correction.
                     // Keep accumulating until the minimum size is reached. Hybrid
                     // structural boundaries remain authoritative.
                     if (structuralBoundary || currentTokens >= options.MinChunkTokens)
-                    {
                         Flush();
-
-                        // A semantic boundary separates topics; do not leak overlap
-                        // from the previous topic into the next retrieval chunk.
-                        if (semanticBoundary)
-                            overlap = string.Empty;
-                    }
                 }
             }
         }
