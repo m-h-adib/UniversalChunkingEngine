@@ -17,12 +17,18 @@ public sealed class OllamaSemanticBoundaryDetector(
     private readonly SemanticChunkingOptions _options = options.Value;
 
     private const string SystemPrompt = """
-        You split a document into coherent topics.
+        You divide a document into coherent retrieval topics.
         Return only JSON: {"splitAfter":[]}
         splitAfter contains zero-based paragraph indexes. Index N means a new
         topic starts at paragraph N+1. Do not include the final paragraph index.
-        Keep explanations, examples and evidence with the topic they explain.
-        Never rewrite or summarize paragraph text.
+        Split only when the next paragraph begins a genuinely different topic.
+        Keep a complete narrative, argument, explanation, example, evidence,
+        correction, and its conclusion together. Do not isolate short follow-up
+        paragraphs or one-line qualifications as separate topics.
+        A paragraph marked heading=true is a strong topic boundary: normally
+        start a new topic before that heading.
+        Prefer coherent multi-paragraph units over one-paragraph chunks.
+        Never rewrite, omit, reorder, or summarize source paragraph text.
         """;
 
     private static readonly object ResponseSchema = new
@@ -51,6 +57,7 @@ public sealed class OllamaSemanticBoundaryDetector(
         {
             index,
             heading = p.IsHeading,
+            sectionTitle = p.SectionTitle,
             text = p.Text
         }).ToArray();
 
@@ -62,7 +69,9 @@ public sealed class OllamaSemanticBoundaryDetector(
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         });
         var firstPrompt = """
-            Identify topic changes in these numbered paragraphs.
+            Identify genuine topic changes in these numbered paragraphs.
+            Keep connected narratives and explanations together; avoid tiny
+            standalone chunks. A heading usually starts a new topic.
             Return a JSON object with one property: splitAfter.
             """ + Environment.NewLine + serializedParagraphs;
 
@@ -79,7 +88,9 @@ public sealed class OllamaSemanticBoundaryDetector(
             {"splitAfter":[]}
             splitAfter is an array of zero-based integers. A value N means
             a new topic begins at paragraph N+1. Valid values: 0 through {{paragraphs.Count - 2}}.
-            Keep related explanations together. Do not output prose.
+            Keep related explanations, examples, corrections and conclusions together.
+            Avoid boundaries that would create a tiny standalone chunk.
+            A heading usually starts a new topic. Do not output prose.
             Paragraphs:
             {{serializedParagraphs}}
             """;
