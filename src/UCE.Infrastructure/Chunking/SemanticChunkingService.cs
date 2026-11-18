@@ -124,7 +124,8 @@ public sealed class SemanticChunkingService(
             cancellationToken.ThrowIfCancellationRequested();
             var paragraph = paragraphs[index];
 
-            var hardBoundary = sectionActive
+            var hardBoundary = options.Strategy == ChunkingStrategy.Hybrid
+                && sectionActive
                 && (paragraph.SectionId != activeSectionId
                     || (options.PreserveHeadings && paragraph.IsHeading));
 
@@ -173,45 +174,51 @@ public sealed class SemanticChunkingService(
     {
         var result = new HashSet<int>();
         var start = 0;
+        var maxParagraphs = Math.Max(2, _semanticOptions.MaxParagraphsPerRequest);
+        var maxCharacters = Math.Max(1, _semanticOptions.MaxInputCharacters);
 
+        // Semantic analysis follows document order, not SectionId. Section metadata
+        // is still supplied to the model, but structural section transitions do not
+        // prevent related paragraphs from being evaluated together.
         while (start < paragraphs.Count - 1)
         {
-            var sectionId = paragraphs[start].SectionId;
+            cancellationToken.ThrowIfCancellationRequested();
+
             var end = start;
-            var maxParagraphs = Math.Max(2, _semanticOptions.MaxParagraphsPerRequest);
+            var characterCount = paragraphs[start].Text.Length;
+
+            // Keep one paragraph of overlap between requests. Never truncate source
+            // paragraphs: the character limit is a batching target, not a text limit.
             while (end + 1 < paragraphs.Count
-                && paragraphs[end + 1].SectionId == sectionId
                 && end - start + 1 < maxParagraphs)
-                end++;
-            var perParagraphCharacterBudget = Math.Max(
-                1, _semanticOptions.MaxInputCharacters / Math.Max(2, end - start + 1));
-
-            if (end > start)
             {
-                var sectionTitle = FindSectionPath(structure.Sections, sectionId)
-                    .LastOrDefault()?.Title;
-                var batch = paragraphs.Skip(start).Take(end - start + 1)
-                    .Select(x => new SemanticParagraphInput(
-                        x.Order,
-                        x.Text.Length > perParagraphCharacterBudget
-                            ? x.Text[..perParagraphCharacterBudget]
-                            : x.Text,
-                        x.IsHeading,
-                        sectionTitle))
-                    .ToArray();
+                var nextLength = paragraphs[end + 1].Text.Length;
+                var hasRightContext = end > start;
+                if (hasRightContext && characterCount + nextLength > maxCharacters)
+                    break;
 
-                var boundaries = await boundaryDetector.DetectBoundariesAsync(
-                    batch, cancellationToken);
-                foreach (var localIndex in boundaries)
-                    result.Add(start + localIndex);
+                characterCount += nextLength;
+                end++;
             }
 
-            // One paragraph overlaps adjacent batches so the boundary between
-            // the two batches is still evaluated with left and right context.
+            var batch = paragraphs.Skip(start).Take(end - start + 1)
+                .Select(x => new SemanticParagraphInput(
+                    x.Order,
+                    x.Text,
+                    x.IsHeading,
+                    FindSectionPath(structure.Sections, x.SectionId)
+                        .LastOrDefault()?.Title))
+                .ToArray();
+
+            var boundaries = await boundaryDetector.DetectBoundariesAsync(
+                batch, cancellationToken);
+
+            foreach (var localIndex in boundaries)
+                result.Add(start + localIndex);
+
+            // The final paragraph is repeated as the first paragraph of the next
+            // batch so a topic transition at a batch edge still has right context.
             start = end;
-            if (start < paragraphs.Count - 1
-                && paragraphs[start].SectionId != paragraphs[start + 1].SectionId)
-                start++;
         }
 
         return result;
