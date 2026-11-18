@@ -104,6 +104,7 @@ public sealed class OllamaSemanticBoundaryDetector(
         {
             model = _options.Model,
             stream = false,
+            think = false,
             format = useJsonSchema ? ResponseSchema : (object)"json",
             messages = new[]
             {
