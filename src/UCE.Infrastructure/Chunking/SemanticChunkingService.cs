@@ -232,20 +232,17 @@ public sealed class SemanticChunkingService(
             return [paragraph];
 
         var pieces = new List<DocumentParagraph>();
-        var buffer = new List<Match>();
 
-        void Flush()
+        void AddPiece(int start, int end)
         {
-            if (buffer.Count == 0) return;
-            var first = buffer[0];
-            var last = buffer[^1];
-            var text = paragraph.Text[first.Index..(last.Index + last.Length)];
+            if (end <= start) return;
+
             pieces.Add(new DocumentParagraph
             {
                 Order = paragraph.Order,
-                Text = text,
-                StartPosition = paragraph.StartPosition + first.Index,
-                EndPosition = paragraph.StartPosition + last.Index + last.Length,
+                Text = paragraph.Text[start..end],
+                StartPosition = paragraph.StartPosition + start,
+                EndPosition = paragraph.StartPosition + end,
                 PageNumber = paragraph.PageNumber,
                 IsHeading = paragraph.IsHeading && pieces.Count == 0,
                 HeadingLevel = paragraph.HeadingLevel,
@@ -254,23 +251,91 @@ public sealed class SemanticChunkingService(
                 Marker = paragraph.Marker,
                 SectionId = paragraph.SectionId
             });
-            buffer.Clear();
         }
 
-        foreach (Match word in Words.Matches(paragraph.Text))
+        void SplitOversizedSentence(int start, int end)
         {
-            var candidate = buffer.Count == 0
-                ? word.Value
-                : paragraph.Text[buffer[0].Index..(word.Index + word.Length)];
-
-            if (buffer.Count > 0 && tokenCounter.Count(candidate) > maxTokens)
+            var sentence = paragraph.Text[start..end];
+            var words = Regex.Matches(sentence, @"\\S+");
+            if (words.Count == 0)
             {
-                Flush();
+                AddPiece(start, end);
+                return;
             }
-            buffer.Add(word);
+
+            var pieceStart = start;
+            var hasWord = false;
+
+            foreach (Match word in words)
+            {
+                var wordStart = start + word.Index;
+                var wordEnd = wordStart + word.Length;
+                var candidate = paragraph.Text[pieceStart..wordEnd];
+
+                if (hasWord && tokenCounter.Count(candidate) > maxTokens)
+                {
+                    // Prefer a word boundary only when a single sentence itself
+                    // cannot fit. Whitespace remains attached to the preceding piece.
+                    AddPiece(pieceStart, wordStart);
+                    pieceStart = wordStart;
+                    hasWord = false;
+                }
+
+                hasWord = true;
+            }
+
+            AddPiece(pieceStart, end);
         }
 
-        Flush();
+        var sentenceEnds = Regex.Matches(
+                paragraph.Text, @"(?<=[.!?؟؛])(?=\\s|$)")
+            .Select(x => x.Index)
+            .Where(x => x > 0 && x < paragraph.Text.Length)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToList();
+
+        var ranges = new List<(int Start, int End)>();
+        var cursor = 0;
+        foreach (var sentenceEnd in sentenceEnds)
+        {
+            ranges.Add((cursor, sentenceEnd));
+            cursor = sentenceEnd;
+        }
+        if (cursor < paragraph.Text.Length || ranges.Count == 0)
+            ranges.Add((cursor, paragraph.Text.Length));
+
+        var pendingStart = -1;
+        var pendingEnd = -1;
+
+        foreach (var range in ranges)
+        {
+            var candidateStart = pendingStart >= 0 ? pendingStart : range.Start;
+            if (pendingStart >= 0
+                && tokenCounter.Count(paragraph.Text[candidateStart..range.End]) > maxTokens)
+            {
+                AddPiece(pendingStart, pendingEnd);
+                pendingStart = -1;
+                pendingEnd = -1;
+            }
+
+            if (pendingStart < 0)
+            {
+                if (tokenCounter.Count(paragraph.Text[range.Start..range.End]) > maxTokens)
+                {
+                    SplitOversizedSentence(range.Start, range.End);
+                    continue;
+                }
+
+                pendingStart = range.Start;
+            }
+
+            pendingEnd = range.End;
+        }
+
+        if (pendingStart >= 0)
+            AddPiece(pendingStart, pendingEnd);
+
         return pieces.Count == 0 ? [paragraph] : pieces;
     }
 
