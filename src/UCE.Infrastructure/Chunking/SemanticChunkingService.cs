@@ -159,7 +159,14 @@ public sealed class SemanticChunkingService(
                 var structuralBoundary = isLastPiece && structuralEnds.Contains(paragraph.EndPosition);
 
                 if (semanticBoundary || structuralBoundary)
+                {
                     Flush();
+
+                    // A semantic boundary separates topics; do not leak overlap
+                    // from the previous topic into the next retrieval chunk.
+                    if (semanticBoundary)
+                        overlap = string.Empty;
+                }
             }
         }
 
