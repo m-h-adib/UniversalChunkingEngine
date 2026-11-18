@@ -139,7 +139,7 @@ public sealed class SemanticChunkingServiceTests
         {
             Strategy = ChunkingStrategy.Semantic,
             MinChunkTokens = 1,
-            TargetChunkTokens = 100,
+            TargetChunkTokens = 7,
             MaxChunkTokens = 7,
             OverlapTokens = 0
         });
