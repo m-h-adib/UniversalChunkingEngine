@@ -124,10 +124,16 @@ public sealed class SemanticChunkingService(
             cancellationToken.ThrowIfCancellationRequested();
             var paragraph = paragraphs[index];
 
-            var hardBoundary = options.Strategy == ChunkingStrategy.Hybrid
-                && sectionActive
-                && (paragraph.SectionId != activeSectionId
-                    || (options.PreserveHeadings && paragraph.IsHeading));
+            // A real heading is a reliable topic boundary in every strategy.
+            // SectionId changes alone remain soft in Semantic mode so a topic can
+            // continue across structural sections.
+            var headingBoundary = sectionActive
+                && options.PreserveHeadings
+                && paragraph.IsHeading;
+            var hardBoundary = headingBoundary
+                || (options.Strategy == ChunkingStrategy.Hybrid
+                    && sectionActive
+                    && paragraph.SectionId != activeSectionId);
 
             if (hardBoundary && current.Count > 0)
                 Flush();
@@ -160,12 +166,19 @@ public sealed class SemanticChunkingService(
 
                 if (semanticBoundary || structuralBoundary)
                 {
-                    Flush();
+                    // Avoid tiny retrieval chunks caused by a boundary after a
+                    // short qualification, continuation, or one-line correction.
+                    // Keep accumulating until the minimum size is reached. Hybrid
+                    // structural boundaries remain authoritative.
+                    if (structuralBoundary || currentTokens >= options.MinChunkTokens)
+                    {
+                        Flush();
 
-                    // A semantic boundary separates topics; do not leak overlap
-                    // from the previous topic into the next retrieval chunk.
-                    if (semanticBoundary)
-                        overlap = string.Empty;
+                        // A semantic boundary separates topics; do not leak overlap
+                        // from the previous topic into the next retrieval chunk.
+                        if (semanticBoundary)
+                            overlap = string.Empty;
+                    }
                 }
             }
         }
